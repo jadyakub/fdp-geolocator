@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>🌍 FDP GeoLocator</title>
+
+  <!-- Leaflet Map CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
+  <style>
+    :root{
+      --primary:#0ea5e9; --primary-2:#6366f1;
+      --green:#10b981; --teal:#06b6d4;
+      --bg:#f6f8ff; --ink:#0f172a; --muted:#64748b;
+      --ring:#c7d2fe; --border:#e5e9ff;
+      --map-h: 440px; /* adaptive map height */
+    }
+    *{box-sizing:border-box}
+    html,body{overflow-x:hidden}
+    body{
+      margin:0; padding:0; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background:
+        radial-gradient(1200px 800px at 20% -10%, rgba(23,16,56,.95) 0%, rgba(23,16,56,.75) 40%, rgba(23,16,56,0) 70%),
+        radial-gradient(1400px 900px at 60% 45%, rgba(14,98,115,.85) 0%, rgba(14,98,115,.45) 55%, rgba(14,98,115,0) 78%),
+        linear-gradient(90deg, #0a101d 0%, #0b2d3a 55%, #0b4a3f 100%);
+      min-height:100vh; color:#eef2f7;
+    }
+    .container{max-width:1200px;margin:0 auto;padding:24px}
+    @media (max-width:768px){ .container{padding:16px} }
+
+    .header{display:flex;align-items:center;justify-content:space-between;gap:12px;color:white;margin-bottom:22px}
+    .brand{display:flex;align-items:center;gap:12px}
+    .logo{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:#081a34;font-weight:900;
+      background:conic-gradient(from 220deg, #60a5fa, #7dd3fc, #a78bfa, #60a5fa);box-shadow:0 12px 28px rgba(99,102,241,.38)}
+    .header h1{font-size:clamp(1.25rem, 2.2vw, 1.9rem);margin:0;text-shadow:2px 2px 4px rgba(0,0,0,.25)}
+    .tagline{font-size:.95rem;opacity:.95}
+    .quote{padding:8px 12px;border-radius:999px;background:rgba(0,0,0,.2);font-size:.82rem;white-space:nowrap}
+    @media (max-width:420px){ .quote{display:none} }
+
+    .main-card{
+      background:linear-gradient(180deg,#ffffffcc,#fffffffb);
+      border-radius:20px;padding:22px 22px 18px;border:1px solid var(--border);
+      box-shadow:0 24px 60px rgba(0,0,0,.25);backdrop-filter:saturate(140%) blur(6px);
+      margin-bottom:20px;color:var(--ink);
+    }
+
+    .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:16px}
+    .stat-card{background:linear-gradient(135deg,var(--green),var(--teal));color:white;padding:16px;border-radius:14px;text-align:center;box-shadow:0 12px 28px rgba(0,0,0,.12)}
+    .stat-number{font-size:clamp(1.25rem,2.4vw,1.9rem);font-weight:800;margin:0}
+    .stat-label{font-size:.86rem;opacity:.92;margin-top:4px}
+
+    .controls-section{
+      display:grid;grid-template-columns:1fr auto auto auto;gap:12px;align-items:center;
+      margin-bottom:16px;padding:12px;background:#f3f6ff;border:1px solid var(--border);border-radius:14px
+    }
+    .search-wrap{position:relative}
+    .search-ico{position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:.6}
+    .search-input{width:100%;padding:12px 14px 12px 38px;border:2px solid #e8ecff;border-radius:10px;font-size:1rem;transition:border-color .2s, box-shadow .2s}
+    .search-input:focus{outline:none;border-color:#7dd3fc;box-shadow:0 0 0 4px var(--ring)}
+    .file-input{position:absolute;left:-9999px}
+    .btn{padding:12px 16px;border:none;border-radius:12px;font-size:.95rem;font-weight:700;min-height:44px;cursor:pointer;transition:transform .12s, filter .2s;display:inline-flex;align-items:center;gap:8px;justify-content:center}
+    .btn:active{transform:translateY(1px)}
+    .btn-primary{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:white}
+    .btn-primary:hover{filter:brightness(1.05)}
+    .btn-secondary{background:#eef2ff;color:#172554;border:1px solid var(--border)}
+    .btn-secondary:hover{filter:brightness(1.03)}
+    .btn-small{padding:10px 12px;font-size:.9rem;min-height:40px}
+    .btn-success{background:linear-gradient(135deg,#10b981,#34d399);color:white;border:1px solid #10b981}
+    .btn-info{background:linear-gradient(135deg,#0ea5e9,#22d3ee);color:#06243a;border:1px solid #7dd3fc}
+
+    .map-container{height:var(--map-h);border-radius:15px;overflow:hidden;margin-bottom:16px;position:relative;border:1px solid var(--border)}
+    #map{height:100%;width:100%}
+    .map-ctl{position:absolute;right:12px;bottom:12px;z-index:10;background:linear-gradient(135deg,var(--primary),var(--primary-2));color:white;border:none;border-radius:12px;padding:10px 14px;font-weight:800;cursor:pointer;box-shadow:0 10px 24px rgba(0,0,0,.18)}
+    @media (max-width:640px){ .map-ctl{top:12px;bottom:auto} }
+
+    .results-section{max-height:420px;overflow:auto;background:#fbfcff;border:1px solid var(--border);border-radius:14px}
+    .list{display:grid;gap:8px;padding:12px}
+    .row{display:grid;grid-template-columns:1.1fr .9fr .6fr 1fr auto;gap:10px;align-items:center;padding:12px;border-radius:12px;background:#f6f8ff;border:1px solid var(--border)}
+    .row.header{position:sticky;top:0;z-index:1;background:#e9f1ff;border-color:#d9e4ff;font-weight:800;color:#1e2b63}
+    .title{font-weight:700;color:#0b1b3a}
+    .muted{color:#5b6b91}
+    .label{display:none;font-weight:700;margin-right:.35rem;color:#1e2b63}
+    .coords{font-variant-numeric:tabular-nums;color:#1e3a8a}
+    .actions{display:flex;gap:8px;justify-content:flex-end}
+    .empty-state{text-align:center;padding:34px;color:#6c757d}
+
+    @media (max-width:900px){ .row{grid-template-columns:1fr .9fr .6fr auto} }
+    @media (max-width:768px){
+      .controls-section{grid-template-columns:1fr; position:sticky; top:8px; z-index:20; backdrop-filter:saturate(160%) blur(6px) }
+      .results-section{max-height:60vh}
+    }
+    @media (max-width:640px){
+      :root{ --map-h: 300px; }
+      .row.header{display:none}
+      .row{grid-template-columns:1fr; align-items:flex-start}
+      .label{display:inline-block}
+      .actions{width:100%;justify-content:stretch}
+      .actions .btn{flex:1}
+    }
+    @media (max-width:420px){ :root{ --map-h: 240px; } }
+
+    .app-footer{position:fixed; left:50%; bottom:12px; transform:translateX(-50%); font-size:12px; line-height:1; color:rgba(255,255,255,.9); text-shadow:0 1px 2px rgba(0,0,0,.45); pointer-events:none; z-index:5; letter-spacing:.2px;}
+    @media (max-width:380px){ .app-footer{font-size:10px} }
+
+    .toast{position:fixed;bottom:18px;right:18px;padding:12px 14px;border-radius:12px;background:linear-gradient(135deg,#22d3ee,#a78bfa);color:#081a34;font-weight:800;box-shadow:0 10px 24px rgba(0,0,0,.2);opacity:0;transform:translateY(10px);transition:all .25s ease;z-index:90}
+    .toast.show{opacity:1;transform:translateY(0)}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="brand">
+        <div class="logo">F</div>
+        <div>
+          <h1>🌍 FDP GeoLocator</h1>
+          <div class="tagline">FDP Search & Navigation</div>
+        </div>
+      </div>
+      <div class="quote">“Locate. Track. Navigate.”</div>
+    </div>
+
+    <div class="main-card">
+      <!-- Stats -->
+      <div class="stats" id="stats">
+        <div class="stat-card">
+          <div class="stat-number" id="totalFDP">0</div>
+          <div class="stat-label">Total FDP</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number" id="searchResults">0</div>
+          <div class="stat-label">Search Results</div>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="controls-section">
+        <div class="search-wrap">
+          <span class="search-ico">🔎</span>
+          <input type="text" class="search-input" id="searchInput" placeholder="Search by FDP name, street or section…">
+        </div>
+        <div>
+          <input type="file" class="file-input" id="csvFile" accept=".csv">
+          <button class="btn btn-secondary" id="importBtn">📁 Import CSV</button>
+        </div>
+        <button class="btn btn-primary" id="exportBtn">💾 Export Data</button>
+        <button class="btn btn-secondary" id="reloadBtn">🔄 Reload Data</button>
+      </div>
+
+      <!-- Map -->
+      <div class="map-container">
+        <button class="map-ctl" id="fitBtn" title="Fit all markers">Fit to Markers</button>
+        <div id="map"></div>
+      </div>
+
+      <!-- Results -->
+      <div class="results-section" id="resultsSection">
+        <div class="list">
+          <div class="row header">
+            <div>FDP Name</div>
+            <div class="muted">Street</div>
+            <div class="muted">Section</div>
+            <div class="muted">Coordinates</div>
+            <div class="muted" style="text-align:right">Actions</div>
+          </div>
+          <div class="empty-state">
+            <h3>No FDP Data</h3>
+            <p>Import a CSV file or click “Reload Data” (expects <code>/data/fdp.csv</code>)</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="app-footer">
+    © 2025 FDP GeoLocator • Built by Mohd Aizad Yakub • NFF PBPS
+  </footer>
+
+  <div id="toast" class="toast">Done</div>
+
+  <!-- Leaflet Map JS -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <script>
+    // ====== State ======
+    let fdpData = [];
+    let filteredData = [];
+    let map, markersLayer, lastHighlighted;
+
+    // ====== Elements ======
+    const searchInput = document.getElementById('searchInput');
+    const csvFile = document.getElementById('csvFile');
+    const importBtn = document.getElementById('importBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const reloadBtn = document.getElementById('reloadBtn');
+    const fitBtn = document.getElementById('fitBtn');
+    const resultsSection = document.getElementById('resultsSection');
+    const totalFDPElement = document.getElementById('totalFDP');
+    const searchResultsElement = document.getElementById('searchResults');
+    const toastEl = document.getElementById('toast');
+
+    // ====== Events ======
+    searchInput.addEventListener('input', handleSearch);
+    importBtn.addEventListener('click', () => csvFile.click());
+    csvFile.addEventListener('change', handleCSVImport);
+    exportBtn.addEventListener('click', exportData);
+    reloadBtn.addEventListener('click', loadCSVFromSite);
+    fitBtn.addEventListener('click', fitToMarkers);
+
+    // ====== Init Map ======
+    function initMap() {
+      map = L.map('map', { zoomControl: true, scrollWheelZoom: true }).setView([4.5, 115.5], 6);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap'
+      }).addTo(map);
+      markersLayer = L.layerGroup().addTo(map);
+    }
+
+    // ====== CSV Handling ======
+    function handleCSVImport(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      readCSV(file);
+      e.target.value = ''; // reset trigger
+    }
+    function readCSV(file){
+      const reader = new FileReader();
+      reader.onload = (ev) => { parseCSV(ev.target.result); showToast('CSV loaded'); };
+      reader.readAsText(file);
+    }
+
+    async function loadCSVFromSite(){
+      try{
+        const res = await fetch('data/fdp.csv?ts=' + Date.now(), { cache:'no-store' });
+        if(!res.ok) throw new Error('HTTP ' + res.status);
+        const text = await res.text();
+        parseCSV(text);
+        showToast('Data reloaded from Git');
+      }catch(err){
+        console.error(err);
+        showToast('Could not load /data/fdp.csv');
+      }
+    }
+
+    // Robust CSV split (supports quoted fields with commas)
+    function safeSplit(line) {
+      const out = []; let cur = ''; let inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (c === '"') { if (inQ && line[i + 1] === '"') { cur += '"'; i++; } else inQ = !inQ; }
+        else if (c === ',' && !inQ) { out.push(cur); cur = ''; }
+        else cur += c;
+      }
+      out.push(cur);
+      return out;
+    }
+
+    function parseCSV(csv) {
+      const lines = csv.replace(/\r/g, '').split('\n').filter(x => x.trim().length);
+      if (lines.length < 2) return;
+
+      const rawHeaders = safeSplit(lines[0]);
+      const norm = s => s.trim().toLowerCase();
+
+      const wanted = {
+        nama: ['fdp name','fdp_name','name','nama'],
+        jalan: ['street name','street','street_name','jalan'],
+        section: ['section','seksyen'],
+        lat: ['latitude','lat'],
+        lng: ['longitude','long','lng','lon']
+      };
+
+      const idx = { nama:-1, jalan:-1, section:-1, lat:-1, lng:-1 };
+      rawHeaders.forEach((h,i)=>{
+        const key = norm(h);
+        for (const k in wanted) {
+          if (wanted[k].includes(key)) { idx[k] = i; break; }
+        }
+      });
+
+      fdpData = [];
+      for (let i = 1; i < lines.length; i++) {
+        const row = safeSplit(lines[i]);
+        if (!row.length) continue;
+        const get = k => idx[k] > -1 ? (row[idx[k]] ?? '').trim() : '';
+        const lat = parseFloat(get('lat'));
+        const lng = parseFloat(get('lng'));
+
+        if ((get('nama') || get('jalan') || get('section')) && isFinite(lat) && isFinite(lng)) {
+          fdpData.push({
+            nama: get('nama') || 'Unknown',
+            jalan: get('jalan') || 'Unknown',
+            section: get('section') || 'Unknown',
+            lat, lng
+          });
+        }
+      }
+
+      filteredData = [...fdpData];
+      updateStats(); renderList(); drawMarkers(); fitToMarkers();
+    }
+
+    // ====== Search & Stats ======
+    function handleSearch() {
+      const q = searchInput.value.trim().toLowerCase();
+      filteredData = !q ? [...fdpData] : fdpData.filter(f =>
+        (f.nama || '').toLowerCase().includes(q) ||
+        (f.jalan || '').toLowerCase().includes(q) ||
+        (f.section || '').toLowerCase().includes(q)
+      );
+      updateStats(); renderList(); drawMarkers(); fitToMarkers();
+    }
+    function updateStats() {
+      totalFDPElement.textContent = fdpData.length;
+      searchResultsElement.textContent = filteredData.length;
+    }
+
+    // ====== Map ======
+    function drawMarkers() {
+      markersLayer.clearLayers(); lastHighlighted = null;
+      filteredData.forEach((f) => {
+        const marker = L.marker([f.lat, f.lng]);
+        marker.bindPopup(`
+          <div style="min-width:220px">
+            <div style="font-weight:700;margin-bottom:4px">${escapeHTML(f.nama)}</div>
+            <div style="font-size:.9rem;color:#0f172a"><b>Street:</b> ${escapeHTML(f.jalan)}</div>
+            <div style="font-size:.9rem;color:#0f172a"><b>Section:</b> ${escapeHTML(f.section)}</div>
+            <div style="font-size:.9rem;color:#0f172a"><b>Coordinates:</b> ${f.lat.toFixed(6)}, ${f.lng.toFixed(6)}</div>
+            <div style="margin-top:8px">
+              <a class="btn btn-success btn-small" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${f.lat},${f.lng}">🧭 Open Google Maps</a>
+            </div>
+          </div>
+        `);
+        marker.addTo(markersLayer);
+        f.__marker = marker;
+      });
+    }
+    function fitToMarkers() {
+      const pts = filteredData.filter(f => isFinite(f.lat) && isFinite(f.lng));
+      if (pts.length === 0) return;
+      if (pts.length === 1) map.setView([pts[0].lat, pts[0].lng], 16);
+      else map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lng])).pad(0.15));
+    }
+    function showOnMap(lat, lng, name, f) {
+      if (!isFinite(lat) || !isFinite(lng)) return;
+      map.flyTo([lat, lng], 17, { duration: .65 });
+      if (f?.__marker) {
+        f.__marker.openPopup();
+        if (lastHighlighted) map.removeLayer(lastHighlighted);
+        lastHighlighted = L.circleMarker([lat, lng], { radius: 14, color: '#22d3ee', weight: 3, opacity: .95 }).addTo(map);
+        setTimeout(()=>{ if (lastHighlighted) { map.removeLayer(lastHighlighted); lastHighlighted = null; } }, 1800);
+      }
+    }
+
+    // ====== Results UI ======
+    function renderList() {
+      if (filteredData.length === 0) {
+        resultsSection.innerHTML = `
+          <div class="list">
+            <div class="row header">
+              <div>FDP Name</div><div class="muted">Street</div>
+              <div class="muted">Section</div><div class="muted">Coordinates</div>
+              <div class="muted" style="text-align:right">Actions</div>
+            </div>
+            <div class="empty-state">
+              <h3>${fdpData.length === 0 ? 'No FDP Data' : 'No Results'}</h3>
+              <p>${fdpData.length === 0 ? 'Import a CSV file or click “Reload Data”' : 'Try different keywords or simplify your search'}</p>
+            </div>
+          </div>`;
+        return;
+      }
+
+      const header = `
+        <div class="row header">
+          <div>FDP Name</div>
+          <div class="muted">Street</div>
+          <div class="muted">Section</div>
+          <div class="muted">Coordinates</div>
+          <div class="muted" style="text-align:right">Actions</div>
+        </div>`;
+
+      const rows = filteredData.map((fdp,i) => `
+        <div class="row">
+          <div class="title">${escapeHTML(fdp.nama)}</div>
+          <div class="muted"><span class="label">Street:</span> ${escapeHTML(fdp.jalan)}</div>
+          <div class="muted"><span class="label">Section:</span> ${escapeHTML(fdp.section)}</div>
+          <div class="coords"><span class="label">Coords:</span> ${fdp.lat.toFixed(6)}, ${fdp.lng.toFixed(6)}</div>
+          <div class="actions">
+            <button class="btn btn-info btn-small" onclick="showOnMap(${fdp.lat}, ${fdp.lng}, '${escapeAttr(fdp.nama)}', filteredData[${i}])">📍 Map</button>
+            <a class="btn btn-success btn-small" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${fdp.lat},${fdp.lng}">🧭 Navigate</a>
+          </div>
+        </div>`).join('');
+
+      resultsSection.innerHTML = `<div class="list">${header}${rows}</div>`;
+    }
+
+    // ====== Export ======
+    function exportData() {
+      if (!filteredData.length) { alert('No data to export.'); return; }
+      const headers = ['FDP Name','Street Name','Section','Latitude','Longitude'];
+      const esc = v => {
+        const s = String(v ?? '');
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+      };
+      const body = filteredData.map(d=>[
+        esc(d.nama), esc(d.jalan), esc(d.section), d.lat, d.lng
+      ].join(',')).join('\n');
+      const csvContent = headers.join(',') + '\n' + body;
+
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `fdp_export_${new Date().toISOString().slice(0,10)}.csv`;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+      showToast('CSV export complete');
+    }
+
+    // ====== Utils & Boot ======
+    function escapeHTML(str=''){ return String(str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
+    function escapeAttr(str=''){ return String(str).replace(/['"]/g, s => ({'"':'&quot;',"'":'&#39;'}[s])); }
+    function showToast(msg){ toastEl.textContent = msg; toastEl.classList.add('show'); clearTimeout(showToast._t); showToast._t = setTimeout(()=>toastEl.classList.remove('show'), 1600); }
+
+    window.addEventListener('load', () => {
+      initMap();
+      // Auto-load CSV from /data/fdp.csv after deploy
+      loadCSVFromSite();
+    });
+  </script>
+</body>
+</html>
