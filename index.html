@@ -33,7 +33,17 @@
     let map, markersLayer, lastHighlighted;
     let fiberLayer, fiberHighlightLayer, fiberPointLayer, fiberNetwork=null;
     let fiberFullMap=null, fiberFullLayers=null, fiberFullBounds=null;
-    const FIBER_FILES = [{prefix:'NBN_C005', file:'NBN_C005_ES_DS_ROUTE.kmz', source:'NBN C005M'}];
+    const FIBER_FILES = [
+      {prefix:'NBN_C001',  file:'NBN_C001_ES_DS_ROUTE.kmz',  source:'NBN C001'},
+      {prefix:'NBN_C002',  file:'NBN_C002_ES_DS_ROUTE.kmz',  source:'NBN C002'},
+      {prefix:'NBN_C003',  file:'NBN_C003_ES_DS_ROUTE.kmz',  source:'NBN C003'},
+      {prefix:'NBN_C004',  file:'NBN_C004_ES_DS_ROUTE.kmz',  source:'NBN C004'},
+      {prefix:'NBN_C005',  file:'NBN_C005_ES_DS_ROUTE.kmz',  source:'NBN C005M'},
+      {prefix:'NBN_C006',  file:'NBN_C006_ES_DS_ROUTE.kmz',  source:'NBN C006'},
+      {prefix:'NBN_C007',  file:'NBN_C007_ES_DS_ROUTE.kmz',  source:'NBN C007'},
+      {prefix:'NBN_C009',  file:'NBN_C009_ES_DS_ROUTE.kmz',  source:'NBN C009'},
+      {prefix:'NBN_C010M', file:'NBN_C010M_ES_DS_ROUTE.kmz', source:'NBN C010M'}
+    ];
 
     // ====== Elements ======
     const searchInput = document.getElementById('searchInput');
