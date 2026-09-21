@@ -42,7 +42,7 @@
     let map, markersLayer, lastHighlighted;
     let fiberLayer, fiberHighlightLayer, fiberPointLayer, fiberNetwork=null;
     let fiberFullMap=null, fiberFullLayers=null, fiberFullBounds=null;
-    let fiberToolLayers=null, currentFiberNet=null, currentFiberGraph=null, fiberMode='trace', measurePoints=[], measureTotal=0;
+    let fiberToolLayers=null, currentFiberNet=null, currentFiberGraph=null, fiberMode='trace', measurePoints=[], measureTotal=0, currentSelectedFDP=null;
     const fiberNetworkCache = new Map();
     const FIBER_FILES = [
       {prefix:'KGU_C001',  file:'KGU_C001 ES_DS ROUTE.kmz',  source:'KGU C001'},
@@ -441,16 +441,46 @@
       fiberFullMap.setView(fault,Math.max(fiberFullMap.getZoom(),16));
     }
 
+    function dpToken(s=''){const m=String(s).toUpperCase().match(/DP\s*0*(\d+)([A-Z]?)/);return m?('DP'+String(parseInt(m[1],10)).padStart(4,'0')+(m[2]||'')):'';}
+    function findSelectedDPPoint(fdp){
+      const token=dpToken(fdp?.nama||'');if(!token)return null;
+      return (currentFiberNet?.points||[]).find(p=>fiberPointKind(p.name)==='DP'&&dpToken(p.name)===token)||null;
+    }
+    function pathToKindFromNode(startNode,kind){return nearestByNetwork(startNode,kind);}
+    function autoTraceSelectedFDP(fdp){
+      if(!fdp||!currentFiberGraph||!currentFiberNet)return;
+      const dp=findSelectedDPPoint(fdp)||{name:fdp.nama,lat:fdp.lat,lng:fdp.lng};
+      if(!isFinite(dp.lat)||!isFinite(dp.lng))return;
+      clearFiberTools(false);
+      const snap=nearestGraphNodeAny(currentFiberGraph,[dp.lat,dp.lng]);if(snap.i<0)return;
+      const fdc=pathToKindFromNode(snap.i,'FDC');
+      const node=pathToKindFromNode(snap.i,'NODE');
+      const target=fdc||node;
+      L.circleMarker([dp.lat,dp.lng],{radius:13,color:'#16a34a',weight:4,fillOpacity:.12}).bindTooltip(dpToken(dp.name)||dp.name,{permanent:true,direction:'top',className:'trace-label'}).addTo(fiberToolLayers);
+      if(snap.d>1)L.polyline([[dp.lat,dp.lng],currentFiberGraph.nodes[snap.i]],{color:'#16a34a',weight:6,opacity:.9}).addTo(fiberToolLayers);
+      if(target){
+        const coords=pathCoords(target.path,currentFiberGraph);
+        if(coords.length)L.polyline(coords,{color:'#16a34a',weight:10,opacity:.95,lineCap:'round',lineJoin:'round'}).addTo(fiberToolLayers);
+        L.circleMarker([target.point.lat,target.point.lng],{radius:13,color:'#16a34a',weight:4,fillOpacity:.12}).bindTooltip(fiberPointKind(target.point.name)+' '+fmtM(target.distance+snap.d),{permanent:true,direction:'top',className:'trace-label'}).addTo(fiberToolLayers);
+        const bounds=L.latLngBounds([[dp.lat,dp.lng],[target.point.lat,target.point.lng],...coords]);if(bounds.isValid())fiberFullMap.fitBounds(bounds.pad(.18));
+      }else fiberFullMap.setView([dp.lat,dp.lng],17);
+      showToolPanel('<h3>📍 FDP Connection</h3><div class="analysis-row"><b>Selected FDP</b><span>'+escapeHTML(fdp.nama)+'</span></div>'+
+        '<div class="analysis-row"><b>Route To</b><span>'+(target?escapeHTML(target.point.name):'FDC/TM Node not connected')+'</span></div>'+
+        '<div class="analysis-row"><b>Fiber Distance</b><span>'+(target?fmtM(target.distance+snap.d):'-')+'</span></div>'+
+        '<button class="action secondary" onclick="showFullFiberNetwork()">Show Full Network</button>');
+    }
+    function showFullFiberNetwork(){hideToolPanel();fiberToolLayers?.clearLayers();fitFiberFullscreen();showToast('Full fiber network shown');}
+
     async function showFiberRouteForFDP(fdp){
       const cfg=getFiberCfgForFDP(fdp);
       if(!cfg){showToast('Fiber route KMZ not registered for this FDP');return;}
       try{
         showToast('Loading full fiber route…');
         const net=await loadFiberKMZ(cfg);
-        openFiberFullscreen(net,cfg);
+        openFiberFullscreen(net,cfg,fdp);
       }catch(err){console.error(err);showToast('Fiber route unavailable: '+err.message);}
     }
-    function openFiberFullscreen(net,cfg){
+    function openFiberFullscreen(net,cfg,selectedFDP=null){
       const overlay=document.getElementById('fiberFullscreen');
       document.getElementById('fiberFsTitle').textContent=cfg.source+' Fiber Route';
       document.getElementById('fiberFsSub').textContent='Full Network • ES + DS Cable';
@@ -464,7 +494,7 @@
       }
       fiberFullLayers.clearLayers();
       fiberToolLayers?.clearLayers();hideToolPanel();measurePoints=[];measureTotal=0;fiberMode='trace';
-      currentFiberNet=net;currentFiberGraph=buildGraph(net.routes);
+      currentFiberNet=net;currentFiberGraph=buildGraph(net.routes);currentSelectedFDP=selectedFDP;
       document.getElementById('traceBtn')?.classList.add('active');document.getElementById('measureBtn')?.classList.remove('active');
       const pts=[];
       net.routes.forEach(r=>{
@@ -488,7 +518,7 @@
         pts.push([p.lat,p.lng]);
       });
       fiberFullBounds=pts.length?L.latLngBounds(pts):null;
-      setTimeout(()=>{fiberFullMap.invalidateSize();fitFiberFullscreen();},80);
+      setTimeout(()=>{fiberFullMap.invalidateSize();if(currentSelectedFDP)autoTraceSelectedFDP(currentSelectedFDP);else fitFiberFullscreen();},120);
     }
     function fitFiberFullscreen(){if(fiberFullMap&&fiberFullBounds&&fiberFullBounds.isValid())fiberFullMap.fitBounds(fiberFullBounds.pad(.08));}
     function closeFiberFullscreen(){
