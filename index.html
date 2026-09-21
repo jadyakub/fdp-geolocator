@@ -79,7 +79,7 @@
 
     // ====== Init Map ======
     function initMap() {
-      map = L.map('map', { zoomControl: true, scrollWheelZoom: true }).setView([4.5, 115.5], 6);
+      map = L.map('map', { zoomControl:true, scrollWheelZoom:true, maxZoom:22 }).setView([4.5,115.5],6);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution: '&copy; OpenStreetMap'
@@ -456,8 +456,8 @@
       document.getElementById('fiberFsSub').textContent='Full Network • ES + DS Cable';
       overlay.classList.add('show');overlay.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
       if(!fiberFullMap){
-        fiberFullMap=L.map('fiberFullMap',{zoomControl:true,preferCanvas:true});
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(fiberFullMap);
+        fiberFullMap=L.map('fiberFullMap',{zoomControl:true,preferCanvas:true,maxZoom:22});
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxNativeZoom:19,maxZoom:22,attribution:'&copy; OpenStreetMap'}).addTo(fiberFullMap);
         fiberFullLayers=L.layerGroup().addTo(fiberFullMap);
         fiberToolLayers=L.layerGroup().addTo(fiberFullMap);
         fiberFullMap.on('click',handleFiberMapClick);
