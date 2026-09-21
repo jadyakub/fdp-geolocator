@@ -368,7 +368,7 @@
       L.circleMarker([result.point.lat,result.point.lng],{radius:12,color:'#16a34a',weight:4,fillOpacity:.12}).bindTooltip(label,{permanent:true,direction:'top',className:'trace-label'}).addTo(fiberToolLayers);
     }
     function setBaseNetworkVisible(visible){
-      fiberRouteLayers.forEach(x=>{x.line.setStyle({opacity:visible?.92:.05});x.hit.setStyle({opacity:visible?.001:0});});
+      fiberRouteLayers.forEach(x=>{x.line.setStyle({opacity:visible?.92:0});x.hit.setStyle({opacity:visible?.001:0});});
       fiberPointLayers.forEach(x=>{if(visible){if(!fiberFullMap.hasLayer(x.marker))x.marker.addTo(fiberFullMap);}else if(fiberFullMap.hasLayer(x.marker))fiberFullMap.removeLayer(x.marker);});
     }
     function traceDPToFDC(dp){
@@ -534,20 +534,26 @@
         const color=r.type==='ES'?'#ef4444':r.type==='DS'?'#0878ff':'#64748b';
         const line=L.polyline(r.coords,{color,weight:5,opacity:.92,lineCap:'round',lineJoin:'round'})
           .bindPopup(`<b>${escapeHTML(r.type)} Cable</b><br>${escapeHTML(r.name)}<br>Approx. ${fmtM(r.length)}<br><small>Trace mode: click fiber to highlight green</small>`).addTo(fiberFullLayers);
-        const hit=L.polyline(r.coords,{color:'#000',weight:24,opacity:0.001,lineCap:'round',lineJoin:'round'}).addTo(fiberFullLayers);
-        const traceClick=e=>{if(fiberMode!=='trace')return;L.DomEvent.stopPropagation(e);fiberFullMap.closePopup();traceFiberRoute(r,e.latlng);};
+        const hit=L.polyline(r.coords,{color:'#000',weight:18,opacity:0.001,lineCap:'round',lineJoin:'round',pane:'overlayPane'}).addTo(fiberFullLayers);
+        const traceClick=e=>{
+          if(fiberMode!=='trace')return;L.DomEvent.stopPropagation(e);fiberFullMap.closePopup();
+          const click=[e.latlng.lat,e.latlng.lng];
+          let nearDP=null,nearD=22;
+          specialPoints('DP').forEach(p=>{const d=haversine(click,[p.lat,p.lng]);if(d<nearD){nearD=d;nearDP=p;}});
+          if(nearDP)traceDPToFDC(nearDP);else traceFiberRoute(r,e.latlng);
+        };
         line.on('click',traceClick);hit.on('click',traceClick);fiberRouteLayers.push({line,hit,route:r});
         pts.push(...r.coords);
       });
       net.points.forEach(p=>{
         if(!isFinite(p.lat)||!isFinite(p.lng))return;
         const kind=fiberPointKind(p.name);
-        const marker=L.marker([p.lat,p.lng],{icon:fiberIcon(kind)}).bindPopup(`<b>${escapeHTML(p.name)}</b><br>${kind}<br>${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`).addTo(fiberFullLayers);
+        const marker=L.marker([p.lat,p.lng],{icon:fiberIcon(kind),zIndexOffset:1000}).bindPopup(`<b>${escapeHTML(p.name)}</b><br>${kind}<br>${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`).addTo(fiberFullLayers);
         // Always show a compact DP name label on the full-screen fiber map.
         if(kind==='DP'){
           const dpLabel=(p.name.match(/DP\s*\d+[A-Z]?/i)||[p.name])[0].toUpperCase();
           marker.bindTooltip(escapeHTML(dpLabel),{permanent:true,direction:'top',offset:[0,-15],className:'dp-map-label',opacity:1});
-          marker.on('click',e=>{if(fiberMode==='trace'){L.DomEvent.stopPropagation(e);fiberFullMap.closePopup();traceDPToFDC(p);}});
+          marker.on('click',e=>{if(fiberMode==='trace'){if(e.originalEvent){L.DomEvent.stopPropagation(e.originalEvent);L.DomEvent.preventDefault(e.originalEvent);}fiberFullMap.closePopup();traceDPToFDC(p);return false;}});
         }
         fiberPointLayers.push({marker,point:p,kind});
         pts.push([p.lat,p.lng]);
