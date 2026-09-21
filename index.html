@@ -42,7 +42,7 @@
     let map, markersLayer, lastHighlighted;
     let fiberLayer, fiberHighlightLayer, fiberPointLayer, fiberNetwork=null;
     let fiberFullMap=null, fiberFullLayers=null, fiberFullBounds=null;
-    let fiberToolLayers=null, fiberTraceLayers=null, currentFiberNet=null, currentFiberGraph=null, fiberMode='trace', measurePoints=[], measureTotal=0, currentSelectedFDP=null, fiberRouteLayers=[], fiberPointLayers=[];
+    let fiberToolLayers=null, currentFiberNet=null, currentFiberGraph=null, fiberMode='trace', measurePoints=[], measureTotal=0;
     const fiberNetworkCache = new Map();
     const FIBER_FILES = [
       {prefix:'KGU_C001',  file:'KGU_C001 ES_DS ROUTE.kmz',  source:'KGU C001'},
@@ -367,38 +367,6 @@
       if(coords.length)L.polyline(coords,{color:'#16a34a',weight:9,opacity:.9,lineCap:'round',lineJoin:'round'}).addTo(fiberToolLayers);
       L.circleMarker([result.point.lat,result.point.lng],{radius:12,color:'#16a34a',weight:4,fillOpacity:.12}).bindTooltip(label,{permanent:true,direction:'top',className:'trace-label'}).addTo(fiberToolLayers);
     }
-    function setBaseNetworkVisible(visible){
-      fiberRouteLayers.forEach(x=>{x.line.setStyle({opacity:visible?.92:0});x.hit.setStyle({opacity:visible?.001:0});});
-      fiberPointLayers.forEach(x=>{if(visible){if(!fiberFullMap.hasLayer(x.marker))x.marker.addTo(fiberFullMap);}else if(fiberFullMap.hasLayer(x.marker))fiberFullMap.removeLayer(x.marker);});
-    }
-    function traceDPToFDC(dp){
-      if(!currentFiberGraph||!dp)return;
-      fiberTraceLayers?.clearLayers();fiberToolLayers?.clearLayers();hideToolPanel();fiberMode='trace';
-      const snap=nearestGraphNodeAny(currentFiberGraph,[dp.lat,dp.lng]);if(snap.i<0)return;
-      let target=nearestByNetwork(snap.i,'FDC');
-      if(!target)target=nearestByNetwork(snap.i,'NODE');
-      setBaseNetworkVisible(false);
-      L.marker([dp.lat,dp.lng],{icon:fiberIcon('DP')}).bindTooltip(dpToken(dp.name)||dp.name,{permanent:true,direction:'top',offset:[0,-15],className:'dp-map-label',opacity:1}).addTo(fiberTraceLayers);
-      if(snap.d>1)L.polyline([[dp.lat,dp.lng],currentFiberGraph.nodes[snap.i]],{color:'#16a34a',weight:9,opacity:.95}).addTo(fiberTraceLayers);
-      let coords=[];
-      if(target){
-        coords=pathCoords(target.path,currentFiberGraph);
-        if(coords.length)L.polyline(coords,{color:'#16a34a',weight:10,opacity:.96,lineCap:'round',lineJoin:'round'}).addTo(fiberTraceLayers);
-        // Keep only JT markers that sit close to the selected traced path.
-        specialPoints('JT').forEach(j=>{
-          const near=coords.some(q=>haversine(q,[j.lat,j.lng])<18);
-          if(near)L.marker([j.lat,j.lng],{icon:fiberIcon('JT')}).bindPopup('<b>'+escapeHTML(j.name)+'</b><br>JT on selected route').addTo(fiberTraceLayers);
-        });
-        L.marker([target.point.lat,target.point.lng],{icon:fiberIcon(fiberPointKind(target.point.name))}).bindTooltip(fiberPointKind(target.point.name),{permanent:true,direction:'top',className:'trace-label'}).addTo(fiberTraceLayers);
-        const b=L.latLngBounds([[dp.lat,dp.lng],[target.point.lat,target.point.lng],...coords]);if(b.isValid())fiberFullMap.fitBounds(b.pad(.16));
-      }else fiberFullMap.setView([dp.lat,dp.lng],17);
-      showToolPanel('<h3>🔗 DP → JT → FDC Trace</h3>'+
-        '<div class="analysis-row"><b>Selected DP</b><span>'+escapeHTML(dp.name)+'</span></div>'+
-        '<div class="analysis-row"><b>Destination</b><span>'+(target?escapeHTML(target.point.name):'FDC not connected')+'</span></div>'+
-        '<div class="analysis-row"><b>Fiber Distance</b><span>'+(target?fmtM(target.distance+snap.d):'-')+'</span></div>'+
-        '<div style="font-size:11px;color:#7180a2;margin-top:8px">Only the selected DP connection is shown. Other routes are hidden.</div>'+
-        '<button class="action secondary" onclick="showFullFiberNetwork()">Show Full Network</button>');
-    }
     function traceFiberRoute(route,latlng){
       if(!currentFiberGraph)return;
       clearFiberTools(false);fiberMode='trace';
@@ -473,46 +441,16 @@
       fiberFullMap.setView(fault,Math.max(fiberFullMap.getZoom(),16));
     }
 
-    function dpToken(s=''){const m=String(s).toUpperCase().match(/DP\s*0*(\d+)([A-Z]?)/);return m?('DP'+String(parseInt(m[1],10)).padStart(4,'0')+(m[2]||'')):'';}
-    function findSelectedDPPoint(fdp){
-      const token=dpToken(fdp?.nama||'');if(!token)return null;
-      return (currentFiberNet?.points||[]).find(p=>fiberPointKind(p.name)==='DP'&&dpToken(p.name)===token)||null;
-    }
-    function pathToKindFromNode(startNode,kind){return nearestByNetwork(startNode,kind);}
-    function autoTraceSelectedFDP(fdp){
-      if(!fdp||!currentFiberGraph||!currentFiberNet)return;
-      const dp=findSelectedDPPoint(fdp)||{name:fdp.nama,lat:fdp.lat,lng:fdp.lng};
-      if(!isFinite(dp.lat)||!isFinite(dp.lng))return;
-      clearFiberTools(false);
-      const snap=nearestGraphNodeAny(currentFiberGraph,[dp.lat,dp.lng]);if(snap.i<0)return;
-      const fdc=pathToKindFromNode(snap.i,'FDC');
-      const node=pathToKindFromNode(snap.i,'NODE');
-      const target=fdc||node;
-      L.circleMarker([dp.lat,dp.lng],{radius:13,color:'#16a34a',weight:4,fillOpacity:.12}).bindTooltip(dpToken(dp.name)||dp.name,{permanent:true,direction:'top',className:'trace-label'}).addTo(fiberToolLayers);
-      if(snap.d>1)L.polyline([[dp.lat,dp.lng],currentFiberGraph.nodes[snap.i]],{color:'#16a34a',weight:6,opacity:.9}).addTo(fiberToolLayers);
-      if(target){
-        const coords=pathCoords(target.path,currentFiberGraph);
-        if(coords.length)L.polyline(coords,{color:'#16a34a',weight:10,opacity:.95,lineCap:'round',lineJoin:'round'}).addTo(fiberToolLayers);
-        L.circleMarker([target.point.lat,target.point.lng],{radius:13,color:'#16a34a',weight:4,fillOpacity:.12}).bindTooltip(fiberPointKind(target.point.name)+' '+fmtM(target.distance+snap.d),{permanent:true,direction:'top',className:'trace-label'}).addTo(fiberToolLayers);
-        const bounds=L.latLngBounds([[dp.lat,dp.lng],[target.point.lat,target.point.lng],...coords]);if(bounds.isValid())fiberFullMap.fitBounds(bounds.pad(.18));
-      }else fiberFullMap.setView([dp.lat,dp.lng],17);
-      showToolPanel('<h3>📍 FDP Connection</h3><div class="analysis-row"><b>Selected FDP</b><span>'+escapeHTML(fdp.nama)+'</span></div>'+
-        '<div class="analysis-row"><b>Route To</b><span>'+(target?escapeHTML(target.point.name):'FDC/TM Node not connected')+'</span></div>'+
-        '<div class="analysis-row"><b>Fiber Distance</b><span>'+(target?fmtM(target.distance+snap.d):'-')+'</span></div>'+
-        '<button class="action secondary" onclick="showFullFiberNetwork()">Show Full Network</button>');
-    }
-    function showFullFiberNetwork(){hideToolPanel();fiberToolLayers?.clearLayers();fiberTraceLayers?.clearLayers();setBaseNetworkVisible(true);fitFiberFullscreen();showToast('Full fiber network shown');}
-
     async function showFiberRouteForFDP(fdp){
       const cfg=getFiberCfgForFDP(fdp);
       if(!cfg){showToast('Fiber route KMZ not registered for this FDP');return;}
       try{
         showToast('Loading full fiber route…');
         const net=await loadFiberKMZ(cfg);
-        openFiberFullscreen(net,cfg,fdp);
+        openFiberFullscreen(net,cfg);
       }catch(err){console.error(err);showToast('Fiber route unavailable: '+err.message);}
     }
-    function openFiberFullscreen(net,cfg,selectedFDP=null){
+    function openFiberFullscreen(net,cfg){
       const overlay=document.getElementById('fiberFullscreen');
       document.getElementById('fiberFsTitle').textContent=cfg.source+' Fiber Route';
       document.getElementById('fiberFsSub').textContent='Full Network • ES + DS Cable';
@@ -522,44 +460,35 @@
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(fiberFullMap);
         fiberFullLayers=L.layerGroup().addTo(fiberFullMap);
         fiberToolLayers=L.layerGroup().addTo(fiberFullMap);
-        fiberTraceLayers=L.layerGroup().addTo(fiberFullMap);
         fiberFullMap.on('click',handleFiberMapClick);
       }
       fiberFullLayers.clearLayers();
-      fiberToolLayers?.clearLayers();fiberTraceLayers?.clearLayers();fiberRouteLayers=[];fiberPointLayers=[];hideToolPanel();measurePoints=[];measureTotal=0;fiberMode='trace';
-      currentFiberNet=net;currentFiberGraph=buildGraph(net.routes);currentSelectedFDP=selectedFDP;
+      fiberToolLayers?.clearLayers();hideToolPanel();measurePoints=[];measureTotal=0;fiberMode='trace';
+      currentFiberNet=net;currentFiberGraph=buildGraph(net.routes);
       document.getElementById('traceBtn')?.classList.add('active');document.getElementById('measureBtn')?.classList.remove('active');
       const pts=[];
       net.routes.forEach(r=>{
         const color=r.type==='ES'?'#ef4444':r.type==='DS'?'#0878ff':'#64748b';
         const line=L.polyline(r.coords,{color,weight:5,opacity:.92,lineCap:'round',lineJoin:'round'})
           .bindPopup(`<b>${escapeHTML(r.type)} Cable</b><br>${escapeHTML(r.name)}<br>Approx. ${fmtM(r.length)}<br><small>Trace mode: click fiber to highlight green</small>`).addTo(fiberFullLayers);
-        const hit=L.polyline(r.coords,{color:'#000',weight:18,opacity:0.001,lineCap:'round',lineJoin:'round',pane:'overlayPane'}).addTo(fiberFullLayers);
-        const traceClick=e=>{
-          if(fiberMode!=='trace')return;L.DomEvent.stopPropagation(e);fiberFullMap.closePopup();
-          const click=[e.latlng.lat,e.latlng.lng];
-          let nearDP=null,nearD=22;
-          specialPoints('DP').forEach(p=>{const d=haversine(click,[p.lat,p.lng]);if(d<nearD){nearD=d;nearDP=p;}});
-          if(nearDP)traceDPToFDC(nearDP);else traceFiberRoute(r,e.latlng);
-        };
-        line.on('click',traceClick);hit.on('click',traceClick);fiberRouteLayers.push({line,hit,route:r});
+        const hit=L.polyline(r.coords,{color:'#000',weight:24,opacity:0.001,lineCap:'round',lineJoin:'round'}).addTo(fiberFullLayers);
+        const traceClick=e=>{if(fiberMode!=='trace')return;L.DomEvent.stopPropagation(e);fiberFullMap.closePopup();traceFiberRoute(r,e.latlng);};
+        line.on('click',traceClick);hit.on('click',traceClick);
         pts.push(...r.coords);
       });
       net.points.forEach(p=>{
         if(!isFinite(p.lat)||!isFinite(p.lng))return;
         const kind=fiberPointKind(p.name);
-        const marker=L.marker([p.lat,p.lng],{icon:fiberIcon(kind),zIndexOffset:1000}).bindPopup(`<b>${escapeHTML(p.name)}</b><br>${kind}<br>${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`).addTo(fiberFullLayers);
+        const marker=L.marker([p.lat,p.lng],{icon:fiberIcon(kind)}).bindPopup(`<b>${escapeHTML(p.name)}</b><br>${kind}<br>${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`).addTo(fiberFullLayers);
         // Always show a compact DP name label on the full-screen fiber map.
         if(kind==='DP'){
           const dpLabel=(p.name.match(/DP\s*\d+[A-Z]?/i)||[p.name])[0].toUpperCase();
           marker.bindTooltip(escapeHTML(dpLabel),{permanent:true,direction:'top',offset:[0,-15],className:'dp-map-label',opacity:1});
-          marker.on('click',e=>{if(fiberMode==='trace'){if(e.originalEvent){L.DomEvent.stopPropagation(e.originalEvent);L.DomEvent.preventDefault(e.originalEvent);}fiberFullMap.closePopup();traceDPToFDC(p);return false;}});
         }
-        fiberPointLayers.push({marker,point:p,kind});
         pts.push([p.lat,p.lng]);
       });
       fiberFullBounds=pts.length?L.latLngBounds(pts):null;
-      setTimeout(()=>{fiberFullMap.invalidateSize();if(currentSelectedFDP)autoTraceSelectedFDP(currentSelectedFDP);else fitFiberFullscreen();},120);
+      setTimeout(()=>{fiberFullMap.invalidateSize();fitFiberFullscreen();},80);
     }
     function fitFiberFullscreen(){if(fiberFullMap&&fiberFullBounds&&fiberFullBounds.isValid())fiberFullMap.fitBounds(fiberFullBounds.pad(.08));}
     function closeFiberFullscreen(){
