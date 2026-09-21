@@ -327,10 +327,11 @@
       return FIBER_FILES.find(x=>key.startsWith(x.prefix));
     }
     function fiberPointKind(name=''){
-      const n=name.toUpperCase();
+      const n=String(name||'').toUpperCase().trim();
       if(n.includes('TM NODE')||n.includes('OLT')) return 'NODE';
       if(n==='JT'||n.includes('JOINT')) return 'JT';
-      if(/DP\s*\d+/i.test(n)) return 'DP';
+      if(/DB\s*\d+[A-Z]?/i.test(n)) return 'DB';
+      if(/DP\s*\d+[A-Z]?/i.test(n)) return 'DP';
       return 'FDC';
     }
     function fiberIcon(kind){
