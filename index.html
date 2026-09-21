@@ -6,6 +6,8 @@
 
 
 .fiber-fullscreen{position:fixed;inset:0;z-index:9999;background:#eef4fb;display:none;flex-direction:column}.fiber-fullscreen.show{display:flex}.fiber-fs-header{height:68px;flex:0 0 68px;display:flex;align-items:center;gap:14px;padding:10px 16px;background:linear-gradient(90deg,#071a45,#087b9b);color:#fff;box-shadow:0 3px 16px #00152f44;z-index:1001}.fiber-back{border:1px solid #ffffff55;background:#ffffff18;color:#fff;border-radius:11px;padding:10px 14px;font-weight:900;cursor:pointer}.fiber-fs-title{min-width:0;display:flex;flex-direction:column;line-height:1.15}.fiber-fs-title b{font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fiber-fs-title small{opacity:.8;margin-top:4px}.fiber-legend{margin-left:auto;display:flex;align-items:center;gap:13px;font-size:12px;font-weight:800;white-space:nowrap}.fiber-legend span{display:flex;align-items:center;gap:5px}.lg{display:inline-block;width:22px;height:5px;border-radius:9px}.lg.es{background:#ef4444}.lg.ds{background:#0878ff}#fiberFullMap{flex:1;width:100%;min-height:0}.fiber-fit{position:absolute;left:14px;bottom:20px;z-index:10000;border:0;border-radius:11px;padding:11px 14px;background:#fff;color:#17345f;font-weight:900;box-shadow:0 5px 18px #00152f33;cursor:pointer}@media(max-width:640px){.fiber-fs-header{height:auto;min-height:64px;flex-wrap:wrap;padding:8px 10px;gap:8px}.fiber-back{padding:9px 11px}.fiber-fs-title{flex:1}.fiber-fs-title b{font-size:15px}.fiber-fs-title small{font-size:10px}.fiber-legend{order:3;width:100%;margin-left:0;justify-content:center;gap:9px;font-size:10px;padding:3px 0}.lg{width:17px;height:4px}.fiber-fit{bottom:16px;left:10px;padding:10px 12px;font-size:12px}}
+
+.fiber-tools{position:absolute;top:82px;right:14px;z-index:10000;display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;max-width:520px}.fiber-tool-btn{border:1px solid #d7e3f2;background:#fff;color:#17345f;border-radius:10px;padding:9px 11px;font-weight:900;box-shadow:0 4px 14px #00152f22;cursor:pointer}.fiber-tool-btn.active{background:#0b67d1;color:#fff;border-color:#0b67d1}.fiber-panel{position:absolute;right:14px;top:130px;z-index:10001;width:320px;max-height:65vh;overflow:auto;background:#fff;border:1px solid #dbe7f8;border-radius:14px;padding:14px;box-shadow:0 10px 30px #00152f33;display:none}.fiber-panel.show{display:block}.fiber-panel h3{margin:0 0 10px;font-size:15px}.fiber-panel input,.fiber-panel select{width:100%;padding:10px;border:1px solid #cad8ee;border-radius:9px;margin:5px 0;font-size:13px}.fiber-panel .action{width:100%;border:0;border-radius:9px;padding:10px;margin-top:6px;background:#0b67d1;color:#fff;font-weight:900;cursor:pointer}.fiber-panel .secondary{background:#eef4ff;color:#174b8f}.analysis-row{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #edf1f8;padding:7px 0;font-size:12px}.measure-label{background:#fff;border:1px solid #0b67d1;color:#123b73;font-weight:900;border-radius:6px;padding:2px 5px;box-shadow:0 2px 5px #0002}.fault-label{background:#fff1f2;border:1px solid #ef4444;color:#991b1b;font-weight:900;border-radius:6px;padding:3px 6px}.trace-label{background:#ecfdf5;border:1px solid #10b981;color:#065f46;font-weight:900;border-radius:6px;padding:3px 6px}@media(max-width:640px){.fiber-tools{top:112px;left:8px;right:8px;justify-content:center;max-width:none}.fiber-tool-btn{font-size:11px;padding:8px}.fiber-panel{left:10px;right:10px;top:158px;width:auto;max-height:58vh}}
 </style>
 <style id="dp-label-style">
 .dp-map-label{background:#fff!important;border:2px solid #0b67d1!important;border-radius:7px!important;color:#102a56!important;font:800 11px/1.1 Arial,sans-serif!important;padding:3px 6px!important;box-shadow:0 2px 6px #0003!important;white-space:nowrap!important}
@@ -23,6 +25,13 @@
     <div class="fiber-legend"><span><i class="lg es"></i>ES Cable</span><span><i class="lg ds"></i>DS Cable</span><span>🟠 JT</span><span>📍 DP</span></div>
   </div>
   <div id="fiberFullMap"></div>
+  <div class="fiber-tools">
+    <button id="traceBtn" class="fiber-tool-btn" onclick="setFiberMode('trace')">🔗 Trace Fiber</button>
+    <button id="measureBtn" class="fiber-tool-btn" onclick="setFiberMode('measure')">📏 Measure</button>
+    <button class="fiber-tool-btn" onclick="openFaultPanel()">⚠ Fault Location</button>
+    <button class="fiber-tool-btn" onclick="clearFiberTools()">🧹 Clear</button>
+  </div>
+  <div id="fiberToolPanel" class="fiber-panel"></div>
   <button class="fiber-fit" onclick="fitFiberFullscreen()">⛶ Fit All Fiber</button>
 </div>
 <div id="toast" class="toast">Done</div>
@@ -33,6 +42,7 @@
     let map, markersLayer, lastHighlighted;
     let fiberLayer, fiberHighlightLayer, fiberPointLayer, fiberNetwork=null;
     let fiberFullMap=null, fiberFullLayers=null, fiberFullBounds=null;
+    let fiberToolLayers=null, currentFiberNet=null, currentFiberGraph=null, fiberMode='trace', measurePoints=[], measureTotal=0;
     const fiberNetworkCache = new Map();
     const FIBER_FILES = [
       {prefix:'KGU_C001',  file:'KGU_C001 ES_DS ROUTE.kmz',  source:'KGU C001'},
@@ -310,13 +320,93 @@
       const n=name.toUpperCase();
       if(n.includes('TM NODE')||n.includes('OLT')) return 'NODE';
       if(n==='JT'||n.includes('JOINT')) return 'JT';
-      if(/DP\d+/i.test(n)) return 'DP';
+      if(/DP\s*\d+/i.test(n)) return 'DP';
       return 'FDC';
     }
     function fiberIcon(kind){
       const cfg={NODE:['#7c3aed','N'],FDC:['#059669','F'],JT:['#f59e0b','J'],DP:['#0b67d1','D']}[kind]||['#64748b','•'];
       return L.divIcon({className:'',html:`<div style="width:26px;height:26px;border-radius:50%;background:${cfg[0]};border:3px solid white;box-shadow:0 2px 8px #0005;color:white;font:900 11px/20px Arial;text-align:center">${cfg[1]}</div>`,iconSize:[26,26],iconAnchor:[13,13]});
     }
+    function setFiberMode(mode){
+      fiberMode=mode;
+      document.getElementById('traceBtn')?.classList.toggle('active',mode==='trace');
+      document.getElementById('measureBtn')?.classList.toggle('active',mode==='measure');
+      if(mode==='measure'){measurePoints=[];measureTotal=0;clearFiberTools(false);showToolPanel('<h3>📏 Measure Distance</h3><div id="measureInfo">Click Point 1 on map, then Point 2 and continue.</div><button class="action secondary" onclick="undoMeasurePoint()">↶ Undo Last Point</button><button class="action secondary" onclick="clearMeasure()">Clear Measurement</button>');}
+      else {showToast('Trace mode: click red/blue fiber line');}
+    }
+    function showToolPanel(html){const p=document.getElementById('fiberToolPanel');p.innerHTML=html;p.classList.add('show');}
+    function hideToolPanel(){document.getElementById('fiberToolPanel')?.classList.remove('show');}
+    function clearFiberTools(hide=true){
+      fiberToolLayers?.clearLayers();measurePoints=[];measureTotal=0;
+      if(hide)hideToolPanel();
+    }
+    function nearestGraphNodeAny(g,p){let bi=-1,bd=Infinity;g.nodes.forEach((n,i)=>{const d=haversine(n,p);if(d<bd){bd=d;bi=i}});return {i:bi,d:bd};}
+    function pointGraphNode(p){return nearestGraphNodeAny(currentFiberGraph,[p.lat,p.lng]);}
+    function pathCoords(path,g){if(!path)return[];const out=[];path.edges.forEach(e=>{const a=g.nodes[e.a],b=g.nodes[e.b];if(!out.length)out.push(a);out.push(b)});return out;}
+    function specialPoints(kind){return (currentFiberNet?.points||[]).filter(p=>fiberPointKind(p.name)===kind&&isFinite(p.lat)&&isFinite(p.lng));}
+    function nearestByNetwork(startNode,kind){
+      let best=null;
+      specialPoints(kind).forEach(p=>{const pn=pointGraphNode(p);if(pn.i<0)return;const path=shortestPath(currentFiberGraph,startNode,pn.i);if(!path)return;const total=path.distance+pn.d;if(!best||total<best.distance)best={point:p,path,distance:total,snap:pn.d};});
+      return best;
+    }
+    function highlightNetworkPath(result,label){
+      if(!result)return;
+      const coords=pathCoords(result.path,currentFiberGraph);
+      if(coords.length)L.polyline(coords,{color:'#16a34a',weight:9,opacity:.9,lineCap:'round',lineJoin:'round'}).addTo(fiberToolLayers);
+      L.circleMarker([result.point.lat,result.point.lng],{radius:12,color:'#16a34a',weight:4,fillOpacity:.12}).bindTooltip(label,{permanent:true,direction:'top',className:'trace-label'}).addTo(fiberToolLayers);
+    }
+    function traceFiberRoute(route,latlng){
+      if(!currentFiberGraph)return;
+      clearFiberTools(false);fiberMode='trace';
+      const start=nearestGraphNodeAny(currentFiberGraph,[latlng.lat,latlng.lng]);
+      const jt=nearestByNetwork(start.i,'JT'),dp=nearestByNetwork(start.i,'DP');
+      const candidates=[jt&&{...jt,kind:'JT'},dp&&{...dp,kind:'DP'}].filter(Boolean).sort((a,b)=>a.distance-b.distance);
+      const best=candidates[0];
+      if(best)highlightNetworkPath(best,best.kind+' '+fmtM(best.distance));
+      showToolPanel('<h3>🔗 Fiber Connection Trace</h3>'+
+        '<div class="analysis-row"><b>Cable</b><span>'+escapeHTML(route.type)+' · '+escapeHTML(route.name||'Segment')+'</span></div>'+
+        '<div class="analysis-row"><b>Nearest JT</b><span>'+(jt?escapeHTML(jt.point.name)+' · '+fmtM(jt.distance):'Not found')+'</span></div>'+
+        '<div class="analysis-row"><b>Nearest DP</b><span>'+(dp?escapeHTML(dp.point.name)+' · '+fmtM(dp.distance):'Not found')+'</span></div>'+
+        '<div style="font-size:11px;color:#7180a2;margin-top:8px">Green = shortest fiber-network path to the nearest JT/DP.</div>');
+    }
+    function handleFiberMapClick(e){
+      if(fiberMode!=='measure')return;
+      const p=[e.latlng.lat,e.latlng.lng];measurePoints.push(p);
+      L.circleMarker(p,{radius:6,color:'#0b67d1',weight:3,fillColor:'#fff',fillOpacity:1}).addTo(fiberToolLayers);
+      if(measurePoints.length>1){
+        const a=measurePoints[measurePoints.length-2],d=haversine(a,p);measureTotal+=d;
+        L.polyline([a,p],{color:'#7c3aed',weight:4,dashArray:'7,6'}).addTo(fiberToolLayers);
+        L.marker([(a[0]+p[0])/2,(a[1]+p[1])/2],{interactive:false,icon:L.divIcon({className:'',html:'<div class="measure-label">'+fmtM(d)+'</div>'})}).addTo(fiberToolLayers);
+      }
+      const info=document.getElementById('measureInfo');if(info)info.innerHTML='<b>Points:</b> '+measurePoints.length+'<br><b>Total:</b> '+fmtM(measureTotal)+'<br><small>Click next point to continue.</small>';
+    }
+    function redrawMeasure(){
+      const pts=[...measurePoints];fiberToolLayers.clearLayers();measureTotal=0;measurePoints=[];
+      pts.forEach(p=>handleFiberMapClick({latlng:{lat:p[0],lng:p[1]}}));
+    }
+    function undoMeasurePoint(){if(measurePoints.length){measurePoints.pop();redrawMeasure();}}
+    function clearMeasure(){measurePoints=[];measureTotal=0;fiberToolLayers?.clearLayers();const i=document.getElementById('measureInfo');if(i)i.innerHTML='Click Point 1 on map, then Point 2 and continue.';}
+    function openFaultPanel(){
+      fiberMode='fault';document.getElementById('traceBtn')?.classList.remove('active');document.getElementById('measureBtn')?.classList.remove('active');
+      showToolPanel('<h3>⚠ Fault Location Analyzer</h3><input id="faultCoord" placeholder="Paste: 5.123456, 116.123456"><button class="action" onclick="analyzeFault()">Analyze Coordinate</button><div id="faultResult" style="margin-top:9px"></div>');
+    }
+    function analyzeFault(){
+      const raw=document.getElementById('faultCoord')?.value||'',m=raw.match(/(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/);
+      if(!m){showToast('Invalid coordinate. Use: latitude, longitude');return;}
+      const lat=+m[1],lng=+m[2];if(!isFinite(lat)||!isFinite(lng)){showToast('Invalid coordinate');return;}
+      clearFiberTools(false);
+      const fault=[lat,lng],snap=nearestGraphNodeAny(currentFiberGraph,fault);
+      L.marker(fault,{icon:L.divIcon({className:'',html:'<div style="font-size:28px">⚠️</div>',iconSize:[30,30],iconAnchor:[15,15]})}).bindTooltip('FAULT',{permanent:true,direction:'top',className:'fault-label'}).addTo(fiberToolLayers);
+      if(snap.i>=0)L.polyline([fault,currentFiberGraph.nodes[snap.i]],{color:'#ef4444',weight:3,dashArray:'5,5'}).addTo(fiberToolLayers);
+      const kinds=[['DP','Nearest DP'],['JT','Nearest JT'],['FDC','FDC'],['NODE','TM Node / OLT']];
+      const results=kinds.map(([k,label])=>({k,label,r:nearestByNetwork(snap.i,k)}));
+      const valid=results.filter(x=>x.r).sort((a,b)=>a.r.distance-b.r.distance);
+      if(valid[0])highlightNetworkPath(valid[0].r,valid[0].label);
+      const rows=results.map(x=>'<div class="analysis-row"><b>'+x.label+'</b><span>'+(x.r?escapeHTML(x.r.point.name)+' · '+fmtM(x.r.distance+snap.d):'Not found')+'</span></div>').join('');
+      const el=document.getElementById('faultResult');if(el)el.innerHTML='<div class="analysis-row"><b>Fault → Fiber</b><span>'+fmtM(snap.d)+'</span></div>'+rows+'<div style="font-size:10px;color:#7180a2;margin-top:8px">Distances follow the mapped fiber network after snapping the fault coordinate to the nearest route.</div>';
+      fiberFullMap.setView(fault,Math.max(fiberFullMap.getZoom(),16));
+    }
+
     async function showFiberRouteForFDP(fdp){
       const cfg=getFiberCfgForFDP(fdp);
       if(!cfg){showToast('Fiber route KMZ not registered for this FDP');return;}
@@ -335,8 +425,13 @@
         fiberFullMap=L.map('fiberFullMap',{zoomControl:true,preferCanvas:true});
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(fiberFullMap);
         fiberFullLayers=L.layerGroup().addTo(fiberFullMap);
+        fiberToolLayers=L.layerGroup().addTo(fiberFullMap);
+        fiberFullMap.on('click',handleFiberMapClick);
       }
       fiberFullLayers.clearLayers();
+      fiberToolLayers?.clearLayers();hideToolPanel();measurePoints=[];measureTotal=0;fiberMode='trace';
+      currentFiberNet=net;currentFiberGraph=buildGraph(net.routes);
+      document.getElementById('traceBtn')?.classList.add('active');document.getElementById('measureBtn')?.classList.remove('active');
       const pts=[];
       net.routes.forEach(r=>{
         const color=r.type==='ES'?'#ef4444':r.type==='DS'?'#0878ff':'#64748b';
@@ -350,7 +445,7 @@
         const marker=L.marker([p.lat,p.lng],{icon:fiberIcon(kind)}).bindPopup(`<b>${escapeHTML(p.name)}</b><br>${kind}<br>${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`).addTo(fiberFullLayers);
         // Always show a compact DP name label on the full-screen fiber map.
         if(kind==='DP'){
-          const dpLabel=(p.name.match(/DP\d+[A-Z]?/i)||[p.name])[0].toUpperCase();
+          const dpLabel=(p.name.match(/DP\s*\d+[A-Z]?/i)||[p.name])[0].toUpperCase();
           marker.bindTooltip(escapeHTML(dpLabel),{permanent:true,direction:'top',offset:[0,-15],className:'dp-map-label',opacity:1});
         }
         pts.push([p.lat,p.lng]);
@@ -360,6 +455,7 @@
     }
     function fitFiberFullscreen(){if(fiberFullMap&&fiberFullBounds&&fiberFullBounds.isValid())fiberFullMap.fitBounds(fiberFullBounds.pad(.08));}
     function closeFiberFullscreen(){
+      clearFiberTools();currentFiberNet=null;currentFiberGraph=null;
       const overlay=document.getElementById('fiberFullscreen');overlay.classList.remove('show');overlay.setAttribute('aria-hidden','true');document.body.style.overflow='';
     }
 
