@@ -42,7 +42,7 @@
     let map, markersLayer, lastHighlighted;
     let fiberLayer, fiberHighlightLayer, fiberPointLayer, fiberNetwork=null;
     let fiberFullMap=null, fiberFullLayers=null, fiberFullBounds=null;
-    let fiberToolLayers=null, currentFiberNet=null, currentFiberGraph=null, fiberMode='trace', measurePoints=[], measureTotal=0;
+    let fiberToolLayers=null, measureMarkerLayer=null, measureLineLayer=null, currentFiberNet=null, currentFiberGraph=null, fiberMode='trace', measurePoints=[], measureTotal=0;
     const fiberNetworkCache = new Map();
     const FIBER_FILES = [
       {prefix:'KGU_C001',  file:'KGU_C001 ES_DS ROUTE.kmz',  source:'KGU C001'},
@@ -340,13 +340,13 @@
       fiberMode=mode;
       document.getElementById('traceBtn')?.classList.toggle('active',mode==='trace');
       document.getElementById('measureBtn')?.classList.toggle('active',mode==='measure');
-      if(mode==='measure'){measurePoints=[];measureTotal=0;clearFiberTools(false);showToolPanel('<h3>📏 Measure Distance</h3><div id="measureInfo">Click DP, JT or fiber line to add Point 1. Drag points anytime to adjust.</div><button class="action secondary" onclick="undoMeasurePoint()">↶ Undo Last Point</button><button class="action secondary" onclick="clearMeasure()">Clear Measurement</button>');}
+      if(mode==='measure'){measurePoints=[];measureTotal=0;clearFiberTools(false);measureMarkerLayer?.clearLayers();measureLineLayer?.clearLayers();showToolPanel('<h3>📏 Measure Distance</h3><div id="measureInfo">Click DP, JT or fiber line to add Point 1. Drag points anytime to adjust.</div><button class="action secondary" onclick="undoMeasurePoint()">↶ Undo Last Point</button><button class="action secondary" onclick="clearMeasure()">Clear Measurement</button>');}
       else {showToast('Trace mode: click red/blue fiber line');}
     }
     function showToolPanel(html){const p=document.getElementById('fiberToolPanel');p.innerHTML=html;p.classList.add('show');}
     function hideToolPanel(){document.getElementById('fiberToolPanel')?.classList.remove('show');}
     function clearFiberTools(hide=true){
-      fiberToolLayers?.clearLayers();measurePoints=[];measureTotal=0;
+      fiberToolLayers?.clearLayers();measureMarkerLayer?.clearLayers();measureLineLayer?.clearLayers();measurePoints=[];measureTotal=0;
       if(hide)hideToolPanel();
     }
     function nearestGraphNodeAny(g,p){let bi=-1,bd=Infinity;g.nodes.forEach((n,i)=>{const d=haversine(n,p);if(d<bd){bd=d;bi=i}});return {i:bi,d:bd};}
@@ -412,39 +412,40 @@
       renderMeasurement();
     }
     function renderMeasurement(){
-      fiberToolLayers.clearLayers();measureTotal=0;
+      measureMarkerLayer?.clearLayers();measureLineLayer?.clearLayers();measureTotal=0;
       measurePoints.forEach((item,idx)=>{
-        const html='<div style="width:28px;height:28px;border-radius:50%;background:#7c3aed;color:#fff;border:3px solid #fff;box-shadow:0 2px 7px #0005;display:flex;align-items:center;justify-content:center;font:bold 12px Arial">'+(idx+1)+'</div>';
-        const marker=L.marker(item.p,{draggable:true,zIndexOffset:2500,icon:L.divIcon({className:'',html,iconSize:[28,28],iconAnchor:[14,14]})}).addTo(fiberToolLayers);
-        marker.bindTooltip('P'+(idx+1)+' · '+escapeHTML(item.kind==='FIBER'?'Fiber':item.name),{direction:'top',offset:[0,-15],className:'measure-label',opacity:1});
+        const html='<div style="width:26px;height:26px;border-radius:50%;background:#7c3aed;color:#fff;border:3px solid #fff;box-shadow:0 2px 7px #0005;display:flex;align-items:center;justify-content:center;font:bold 12px Arial">'+(idx+1)+'</div>';
+        const marker=L.marker(item.p,{draggable:true,zIndexOffset:3000,icon:L.divIcon({className:'',html,iconSize:[26,26],iconAnchor:[13,13]})}).addTo(measureMarkerLayer);
+        marker.bindTooltip('P'+(idx+1)+' · '+escapeHTML(item.kind==='FIBER'?'Fiber':item.name),{direction:'top',offset:[0,-14],className:'measure-label',opacity:1});
         marker.on('drag',ev=>{
-          const ll=ev.target.getLatLng();item.raw=[ll.lat,ll.lng];item.p=[ll.lat,ll.lng];renderMeasurementLinesOnly();
+          const ll=ev.target.getLatLng();item.p=[ll.lat,ll.lng];item.raw=[ll.lat,ll.lng];
+          renderMeasurementLinesOnly();
         });
         marker.on('dragend',ev=>{
           const ll=ev.target.getLatLng(),snap=nearestMeasureTarget([ll.lat,ll.lng]);
-          if(snap){item.raw=[ll.lat,ll.lng];item.p=[...snap.p];item.name=snap.name;item.kind=snap.kind;}
+          if(snap){item.p=[...snap.p];item.raw=[...snap.p];item.name=snap.name;item.kind=snap.kind;}
           renderMeasurement();
         });
       });
       renderMeasurementLinesOnly();
     }
     function renderMeasurementLinesOnly(){
-      fiberToolLayers.eachLayer(l=>{if(l._measureLine||l._measureDistanceLabel)fiberToolLayers.removeLayer(l);});
-      measureTotal=0;
+      measureLineLayer?.clearLayers();measureTotal=0;
       for(let i=1;i<measurePoints.length;i++){
         const a=measurePoints[i-1].p,b=measurePoints[i].p;
-        // Measurement follows the selected plotted points. No graph detour/branch jumping.
-        const d=haversine(a,b);measureTotal+=d;
-        const line=L.polyline([a,b],{color:'#7c3aed',weight:4,opacity:.9,dashArray:'8,6'}).addTo(fiberToolLayers);line._measureLine=true;
+        const d=haversine(a,b);
+        if(!isFinite(d))continue;
+        measureTotal+=d;
+        L.polyline([a,b],{color:'#7c3aed',weight:4,opacity:.95,dashArray:'8,6',interactive:false}).addTo(measureLineLayer);
         const mid=[(a[0]+b[0])/2,(a[1]+b[1])/2];
-        const lab=L.marker(mid,{interactive:false,icon:L.divIcon({className:'',html:'<div class="measure-label">'+fmtM(d)+'</div>',iconAnchor:[18,10]})}).addTo(fiberToolLayers);lab._measureDistanceLabel=true;
+        L.marker(mid,{interactive:false,icon:L.divIcon({className:'',html:'<div class="measure-label">'+fmtM(d)+'</div>',iconAnchor:[20,10]})}).addTo(measureLineLayer);
       }
       const info=document.getElementById('measureInfo');
-      if(info)info.innerHTML='<b>Points:</b> '+measurePoints.length+'<br><b>Total Distance:</b> '+fmtM(measureTotal)+'<br><small>Click DP/JT/fiber. Drag numbered points to adjust; release to snap to nearest DP/JT/fiber.</small>';
+      if(info)info.innerHTML='<b>Points:</b> '+measurePoints.length+'<br><b>Total Distance:</b> '+fmtM(measureTotal)+'<br><small>Purple dashed line = direct distance P1 → P2 → P3. Drag a numbered point to move it.</small>';
     }
     function redrawMeasure(){renderMeasurement();}
     function undoMeasurePoint(){if(measurePoints.length){measurePoints.pop();renderMeasurement();}}
-    function clearMeasure(){measurePoints=[];measureTotal=0;fiberToolLayers?.clearLayers();const i=document.getElementById('measureInfo');if(i)i.innerHTML='Click DP, JT or fiber line to add Point 1. Drag points anytime to adjust.';}
+    function clearMeasure(){measurePoints=[];measureTotal=0;measureMarkerLayer?.clearLayers();measureLineLayer?.clearLayers();const i=document.getElementById('measureInfo');if(i)i.innerHTML='Click DP, JT or fiber line to add Point 1. Drag points anytime to adjust.';}
     function openFaultPanel(){
       fiberMode='fault';document.getElementById('traceBtn')?.classList.remove('active');document.getElementById('measureBtn')?.classList.remove('active');
       showToolPanel('<h3>⚠ Fault Location Analyzer</h3><input id="faultCoord" placeholder="Paste: 5.123456, 116.123456"><button class="action" onclick="analyzeFault()">Analyze Coordinate</button><div id="faultResult" style="margin-top:9px"></div>');
@@ -485,10 +486,12 @@
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxNativeZoom:19,maxZoom:22,attribution:'&copy; OpenStreetMap'}).addTo(fiberFullMap);
         fiberFullLayers=L.layerGroup().addTo(fiberFullMap);
         fiberToolLayers=L.layerGroup().addTo(fiberFullMap);
+        measureMarkerLayer=L.layerGroup().addTo(fiberFullMap);
+        measureLineLayer=L.layerGroup().addTo(fiberFullMap);
         fiberFullMap.on('click',handleFiberMapClick);
       }
       fiberFullLayers.clearLayers();
-      fiberToolLayers?.clearLayers();hideToolPanel();measurePoints=[];measureTotal=0;fiberMode='trace';
+      fiberToolLayers?.clearLayers();measureMarkerLayer?.clearLayers();measureLineLayer?.clearLayers();hideToolPanel();measurePoints=[];measureTotal=0;fiberMode='trace';
       currentFiberNet=net;currentFiberGraph=buildGraph(net.routes);
       document.getElementById('traceBtn')?.classList.add('active');document.getElementById('measureBtn')?.classList.remove('active');
       const pts=[];
