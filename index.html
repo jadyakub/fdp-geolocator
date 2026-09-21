@@ -392,7 +392,7 @@
         '<div style="font-size:11px;color:#7180a2;margin-top:8px">Green line = selected fiber and connected path where KMZ topology joins.</div>');
     }
     function nearestMeasureTarget(raw){
-      let best=null,bd=28;
+      let best=null,bd=35;
       (currentFiberNet?.points||[]).forEach(p=>{
         const kind=fiberPointKind(p.name);
         if((kind!=='DP'&&kind!=='JT')||!isFinite(p.lat)||!isFinite(p.lng))return;
@@ -414,10 +414,11 @@
     function renderMeasurement(){
       fiberToolLayers.clearLayers();measureTotal=0;
       measurePoints.forEach((item,idx)=>{
-        const marker=L.marker(item.p,{draggable:true,zIndexOffset:2000,icon:L.divIcon({className:'',html:'<div class="measure-label" style="font-size:13px;padding:5px 8px">P'+(idx+1)+' · '+escapeHTML(item.kind==='FIBER'?'Fiber':item.name)+'</div>',iconAnchor:[10,18]})}).addTo(fiberToolLayers);
+        const html='<div style="width:28px;height:28px;border-radius:50%;background:#7c3aed;color:#fff;border:3px solid #fff;box-shadow:0 2px 7px #0005;display:flex;align-items:center;justify-content:center;font:bold 12px Arial">'+(idx+1)+'</div>';
+        const marker=L.marker(item.p,{draggable:true,zIndexOffset:2500,icon:L.divIcon({className:'',html,iconSize:[28,28],iconAnchor:[14,14]})}).addTo(fiberToolLayers);
+        marker.bindTooltip('P'+(idx+1)+' · '+escapeHTML(item.kind==='FIBER'?'Fiber':item.name),{direction:'top',offset:[0,-15],className:'measure-label',opacity:1});
         marker.on('drag',ev=>{
-          item.raw=[ev.target.getLatLng().lat,ev.target.getLatLng().lng];
-          item.p=[...item.raw];renderMeasurementLinesOnly();
+          const ll=ev.target.getLatLng();item.raw=[ll.lat,ll.lng];item.p=[ll.lat,ll.lng];renderMeasurementLinesOnly();
         });
         marker.on('dragend',ev=>{
           const ll=ev.target.getLatLng(),snap=nearestMeasureTarget([ll.lat,ll.lng]);
@@ -428,23 +429,18 @@
       renderMeasurementLinesOnly();
     }
     function renderMeasurementLinesOnly(){
-      // remove only measurement lines/labels, keep draggable markers
       fiberToolLayers.eachLayer(l=>{if(l._measureLine||l._measureDistanceLabel)fiberToolLayers.removeLayer(l);});
       measureTotal=0;
       for(let i=1;i<measurePoints.length;i++){
         const a=measurePoints[i-1].p,b=measurePoints[i].p;
-        const an=nearestGraphNodeAny(currentFiberGraph,a),bn=nearestGraphNodeAny(currentFiberGraph,b);
-        const path=(an.i>=0&&bn.i>=0)?shortestPath(currentFiberGraph,an.i,bn.i):null;
-        let d,coords;
-        if(path&&path.edges.length){d=path.distance+an.d+bn.d;coords=[a,...pathCoords(path,currentFiberGraph),b];}
-        else {d=haversine(a,b);coords=[a,b];}
-        measureTotal+=d;
-        const line=L.polyline(coords,{color:'#7c3aed',weight:6,opacity:.9}).addTo(fiberToolLayers);line._measureLine=true;
-        const mid=coords[Math.floor(coords.length/2)]||b;
-        const lab=L.marker(mid,{interactive:false,icon:L.divIcon({className:'',html:'<div class="measure-label">'+fmtM(d)+'</div>'})}).addTo(fiberToolLayers);lab._measureDistanceLabel=true;
+        // Measurement follows the selected plotted points. No graph detour/branch jumping.
+        const d=haversine(a,b);measureTotal+=d;
+        const line=L.polyline([a,b],{color:'#7c3aed',weight:4,opacity:.9,dashArray:'8,6'}).addTo(fiberToolLayers);line._measureLine=true;
+        const mid=[(a[0]+b[0])/2,(a[1]+b[1])/2];
+        const lab=L.marker(mid,{interactive:false,icon:L.divIcon({className:'',html:'<div class="measure-label">'+fmtM(d)+'</div>',iconAnchor:[18,10]})}).addTo(fiberToolLayers);lab._measureDistanceLabel=true;
       }
       const info=document.getElementById('measureInfo');
-      if(info)info.innerHTML='<b>Points:</b> '+measurePoints.length+'<br><b>Total Fiber Distance:</b> '+fmtM(measureTotal)+'<br><small>Click DP/JT/fiber to add point. Drag P1/P2/... to move and auto-snap.</small>';
+      if(info)info.innerHTML='<b>Points:</b> '+measurePoints.length+'<br><b>Total Distance:</b> '+fmtM(measureTotal)+'<br><small>Click DP/JT/fiber. Drag numbered points to adjust; release to snap to nearest DP/JT/fiber.</small>';
     }
     function redrawMeasure(){renderMeasurement();}
     function undoMeasurePoint(){if(measurePoints.length){measurePoints.pop();renderMeasurement();}}
@@ -509,7 +505,7 @@
         if(!isFinite(p.lat)||!isFinite(p.lng))return;
         const kind=fiberPointKind(p.name);
         const marker=L.marker([p.lat,p.lng],{icon:fiberIcon(kind),zIndexOffset:(kind==='DP'||kind==='JT')?900:0}).bindPopup(`<b>${escapeHTML(p.name)}</b><br>${kind}<br>${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`).addTo(fiberFullLayers);
-        if(kind==='DP'||kind==='JT')marker.on('click',ev=>{if(fiberMode==='measure'){if(ev.originalEvent)L.DomEvent.stopPropagation(ev.originalEvent);fiberFullMap.closePopup();addMeasurePoint([p.lat,p.lng]);}});
+        if(kind==='DP'||kind==='JT')marker.on('click',ev=>{if(fiberMode==='measure'){if(ev.originalEvent){L.DomEvent.stopPropagation(ev.originalEvent);L.DomEvent.preventDefault(ev.originalEvent);}fiberFullMap.closePopup();addMeasurePoint([p.lat,p.lng]);return false;}});
         // Always show a compact DP name label on the full-screen fiber map.
         if(kind==='DP'){
           const dpLabel=(p.name.match(/DP\s*\d+[A-Z]?/i)||[p.name])[0].toUpperCase();
