@@ -1,199 +1,12 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>🌍 FDP GeoLocator</title>
-
-  <!-- Leaflet Map CSS -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-    crossorigin=""
-  />
-
-  <style>
-    :root{
-      --primary:#0ea5e9; --primary-2:#6366f1;
-      --green:#10b981; --teal:#06b6d4;
-      --bg:#f6f8ff; --ink:#0f172a; --muted:#64748b;
-      --ring:#c7d2fe; --border:#e5e9ff;
-      --map-h: 440px;
-    }
-    *{box-sizing:border-box}
-    html,body{overflow-x:hidden}
-    body{
-      margin:0; padding:0; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background:
-        radial-gradient(1200px 800px at 20% -10%, rgba(23,16,56,.95) 0%, rgba(23,16,56,.75) 40%, rgba(23,16,56,0) 70%),
-        radial-gradient(1400px 900px at 60% 45%, rgba(14,98,115,.85) 0%, rgba(14,98,115,.45) 55%, rgba(14,98,115,0) 78%),
-        linear-gradient(90deg, #0a101d 0%, #0b2d3a 55%, #0b4a3f 100%);
-      min-height:100vh; color:#eef2f7;
-    }
-    .container{max-width:1200px;margin:0 auto;padding:24px}
-    @media (max-width:768px){ .container{padding:16px} }
-
-    /* Header */
-    .header{display:flex;align-items:center;justify-content:space-between;gap:12px;color:white;margin-bottom:22px}
-    .brand{display:flex;align-items:center;gap:12px}
-    .logo{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:#081a34;font-weight:900;
-      background:conic-gradient(from 220deg, #60a5fa, #7dd3fc, #a78bfa, #60a5fa);box-shadow:0 12px 28px rgba(99,102,241,.38)}
-    .header h1{font-size:clamp(1.25rem, 2.2vw, 1.9rem);margin:0;text-shadow:2px 2px 4px rgba(0,0,0,.25)}
-    .tagline{font-size:.95rem;opacity:.95}
-    .quote{padding:8px 12px;border-radius:999px;background:rgba(0,0,0,.2);font-size:.82rem;white-space:nowrap}
-    @media (max-width:420px){ .quote{display:none} }
-
-    /* Card */
-    .main-card{
-      background:linear-gradient(180deg,#ffffffcc,#fffffffb);
-      border-radius:20px;padding:22px 22px 18px;border:1px solid var(--border);
-      box-shadow:0 24px 60px rgba(0,0,0,.25);backdrop-filter:saturate(140%) blur(6px);
-      margin-bottom:20px;color:var(--ink);
-    }
-
-    /* Stats */
-    .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:16px}
-    .stat-card{background:linear-gradient(135deg,var(--green),var(--teal));color:white;padding:16px;border-radius:14px;text-align:center;box-shadow:0 12px 28px rgba(0,0,0,.12)}
-    .stat-number{font-size:clamp(1.25rem,2.4vw,1.9rem);font-weight:800;margin:0}
-    .stat-label{font-size:.86rem;opacity:.92;margin-top:4px}
-
-    /* Controls (no import/export) */
-    .controls-section{
-      display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;
-      margin-bottom:16px;padding:12px;background:#f3f6ff;border:1px solid var(--border);border-radius:14px
-    }
-    .search-wrap{position:relative}
-    .search-ico{position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:.6}
-    .search-input{width:100%;padding:12px 14px 12px 38px;border:2px solid #e8ecff;border-radius:10px;font-size:1rem;transition:border-color .2s, box-shadow .2s}
-    .search-input:focus{outline:none;border-color:#7dd3fc;box-shadow:0 0 0 4px var(--ring)}
-    .btn{padding:12px 16px;border:none;border-radius:12px;font-size:.95rem;font-weight:700;min-height:44px;cursor:pointer;transition:transform .12s, filter .2s;display:inline-flex;align-items:center;gap:8px;justify-content:center}
-    .btn:active{transform:translateY(1px)}
-    .btn-secondary{background:#eef2ff;color:#172554;border:1px solid var(--border)}
-    .btn-secondary:hover{filter:brightness(1.03)}
-
-    /* Map */
-    .map-container{height:var(--map-h);border-radius:15px;overflow:hidden;margin-bottom:16px;position:relative;border:1px solid var(--border)}
-    #map{height:100%;width:100%}
-    .map-ctl{position:absolute;right:12px;bottom:12px;z-index:10;background:linear-gradient(135deg,var(--primary),var(--primary-2));color:white;border:none;border-radius:12px;padding:10px 14px;font-weight:800;cursor:pointer;box-shadow:0 10px 24px rgba(0,0,0,.18)}
-    @media (max-width:640px){ .map-ctl{top:12px;bottom:auto} }
-
-    /* Results grid */
-    .results-section{max-height:420px;overflow:auto;background:#fbfcff;border:1px solid var(--border);border-radius:14px}
-    .list{display:grid;gap:8px;padding:12px}
-    .row{display:grid;grid-template-columns:1.1fr .9fr .6fr 1fr auto;gap:10px;align-items:center;padding:12px;border-radius:12px;background:#f6f8ff;border:1px solid var(--border)}
-    .row.header{position:sticky;top:0;z-index:1;background:#e9f1ff;border-color:#d9e4ff;font-weight:800;color:#1e2b63}
-    .title{font-weight:700;color:#0b1b3a}
-    .muted{color:#5b6b91}
-    .label{display:none;font-weight:700;margin-right:.35rem;color:#1e2b63}
-    .coords{font-variant-numeric:tabular-nums;color:#1e3a8a}
-    .actions{display:flex;gap:8px;justify-content:flex-end}
-    .btn-info{background:linear-gradient(135deg,#0ea5e9,#22d3ee);color:#06243a;border:1px solid #7dd3fc}
-    .btn-success{background:linear-gradient(135deg,#10b981,#34d399);color:white;border:1px solid #10b981}
-    .empty-state{text-align:center;padding:34px;color:#6c757d}
-
-    /* Responsive tweaks */
-    @media (max-width:900px){ .row{grid-template-columns:1fr .9fr .6fr auto} }
-    @media (max-width:768px){
-      .controls-section{grid-template-columns:1fr auto; position:sticky; top:8px; z-index:20; backdrop-filter:saturate(160%) blur(6px) }
-      .results-section{max-height:60vh}
-    }
-    @media (max-width:640px){
-      :root{ --map-h: 300px; }
-      .row.header{display:none}
-      .row{grid-template-columns:1fr; align-items:flex-start}
-      .label{display:inline-block}
-      .actions{width:100%;justify-content:stretch}
-      .actions .btn{flex:1}
-    }
-    @media (max-width:420px){ :root{ --map-h: 240px; } }
-
-    /* Footer & toast */
-    .app-footer{position:fixed; left:50%; bottom:12px; transform:translateX(-50%); font-size:12px; line-height:1; color:rgba(255,255,255,.9); text-shadow:0 1px 2px rgba(0,0,0,.45); pointer-events:none; z-index:5; letter-spacing:.2px;}
-    @media (max-width:380px){ .app-footer{font-size:10px} }
-
-    .mini{font-size:.8rem;color:#5b6b91;margin-left:10px}
-    .toast{position:fixed;bottom:18px;right:18px;padding:12px 14px;border-radius:12px;background:linear-gradient(135deg,#22d3ee,#a78bfa);color:#081a34;font-weight:800;box-shadow:0 10px 24px rgba(0,0,0,.2);opacity:0;transform:translateY(10px);transition:all .25s ease;z-index:90}
-    .toast.show{opacity:1;transform:translateY(0)}
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <div class="brand">
-        <div class="logo">F</div>
-        <div>
-          <h1>🌍 FDP GeoLocator</h1>
-          <div class="tagline">FDP Search & Navigation</div>
-        </div>
-      </div>
-      <div class="quote">“Locate. Track. Navigate.”</div>
-    </div>
-
-    <div class="main-card">
-      <!-- Stats -->
-      <div class="stats" id="stats">
-        <div class="stat-card">
-          <div class="stat-number" id="totalFDP">0</div>
-          <div class="stat-label">Total FDP</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-number" id="searchResults">0</div>
-          <div class="stat-label">Search Results</div>
-        </div>
-      </div>
-
-      <!-- Controls -->
-      <div class="controls-section">
-        <div class="search-wrap">
-          <span class="search-ico">🔎</span>
-          <input type="text" class="search-input" id="searchInput" placeholder="Search by FDP name, street or section…">
-        </div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end">
-          <button class="btn btn-secondary" id="reloadBtn">🔄 Reload Data</button>
-        </div>
-      </div>
-      <div class="mini">Source: <code>/FDP_Locations.csv</code> (from Git)</div>
-
-      <!-- Map -->
-      <div class="map-container">
-        <button class="map-ctl" id="fitBtn" title="Fit all markers">Fit to Markers</button>
-        <div id="map"></div>
-      </div>
-
-      <!-- Results -->
-      <div class="results-section" id="resultsSection">
-        <div class="list">
-          <div class="row header">
-            <div>FDP Name</div>
-            <div class="muted">Street</div>
-            <div class="muted">Section</div>
-            <div class="muted">Coordinates</div>
-            <div class="muted" style="text-align:right">Actions</div>
-          </div>
-          <div class="empty-state">
-            <h3>No FDP Data</h3>
-            <p>Click “Reload Data” (expects <code>/FDP_Locations.csv</code> at repo root)</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <footer class="app-footer">
-    © 2025 FDP GeoLocator • Built by Mohd Aizad Yakub • NFF PBPS
-  </footer>
-
-  <div id="toast" class="toast">Done</div>
-
-  <!-- Leaflet Map JS -->
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-    crossorigin=""
-  ></script>
-
-  <script>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FDP GeoLocator</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<style>
+:root{--blue:#0b55b7;--navy:#092a68;--cyan:#18c9d4;--green:#12a876;--ink:#0b2252;--muted:#7180a2;--line:#e2eaf8;--soft:#f5f8ff}*{box-sizing:border-box}body{margin:0;font-family:Inter,"Segoe UI",Arial,sans-serif;color:var(--ink);background:#f7faff}.top{background:linear-gradient(115deg,#252061 0%,#076d91 55%,#08795d 100%);padding:24px 4vw 88px;color:#fff;position:relative;overflow:hidden}.top:after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 55% 20%,rgba(36,224,232,.15),transparent 35%);pointer-events:none}.header{max-width:1440px;margin:auto;display:flex;align-items:center;justify-content:space-between;position:relative;z-index:1}.brand{display:flex;align-items:center;gap:18px}.logo{width:68px;height:68px;border-radius:18px;background:linear-gradient(145deg,#1e7cff,#19ddd0);display:grid;place-items:center;font-size:34px;box-shadow:0 12px 30px #071a4d55}.brand h1{margin:0;font-size:34px;letter-spacing:-1px}.brand h1 span{color:#55d7ee}.tag{font-size:16px;margin-top:4px}.date{padding:11px 18px;border:1px solid #4ed6c488;background:#075f6577;border-radius:14px;font-weight:700}.shell{max-width:1440px;margin:-64px auto 0;padding:0 24px 28px;position:relative;z-index:2}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}.stat{background:#fff;border:1px solid #dbe7f8;border-radius:17px;padding:18px 22px;display:flex;align-items:center;gap:17px;box-shadow:0 10px 28px #21447b12}.stat-ico{width:58px;height:58px;border-radius:15px;display:grid;place-items:center;font-size:29px;background:#e4f8ff}.stat:nth-child(2) .stat-ico{background:#eef0ff}.stat:nth-child(3) .stat-ico{background:#dcfaee}.stat-label{font-size:14px;font-weight:800}.stat-num{font-size:30px;font-weight:900;color:#0c3990;line-height:1}.stat-sub{font-size:12px;color:#8290ae;margin-top:6px}.workspace{background:#fff;border:1px solid #dbe7f8;border-radius:20px;box-shadow:0 12px 35px #18396812;display:grid;grid-template-columns:47% 53%;overflow:hidden;min-height:650px}.left{padding:24px;border-right:1px solid var(--line)}.search-title{font-size:20px;font-weight:900;display:flex;gap:12px;align-items:center}.search-sub{color:var(--muted);font-size:13px;margin:4px 0 17px 38px}.searchbar{display:grid;grid-template-columns:1fr auto;gap:10px}.search-input{border:1px solid #cad8ee;border-radius:11px;padding:14px 16px;font-size:15px;outline:none}.search-input:focus{border-color:#2c79dc;box-shadow:0 0 0 3px #dcecff}.search-btn,.reload-btn{border:0;border-radius:11px;background:linear-gradient(135deg,#0a63c8,#063f91);color:#fff;padding:0 22px;font-weight:800;cursor:pointer}.filter-row{display:grid;grid-template-columns:1fr auto;gap:10px;margin:12px 0 16px}.filter-chip{border:1px solid #d6e0ef;border-radius:10px;padding:11px 13px;color:#647495;background:#fff}.reload-btn{padding:10px 14px;background:#edf4ff;color:#18498e;border:1px solid #d5e3f7}.results-head{display:flex;justify-content:space-between;align-items:center;border-top:1px solid #edf1f8;padding:16px 4px 10px;font-weight:900}.badge{color:#0bb987}.results-section{height:455px;overflow:auto;padding-right:5px}.result-item{display:grid;grid-template-columns:40px 1fr auto;gap:12px;align-items:center;padding:13px 12px;margin:8px 0;border:1px solid #edf1f8;border-radius:13px;background:#fff;box-shadow:0 4px 12px #274c7d0a}.num{width:34px;height:34px;border-radius:50%;background:#1474ed;color:#fff;display:grid;place-items:center;font-weight:900}.result-name{font-weight:900}.result-meta,.result-coords{font-size:12px;color:#7180a2;margin-top:3px}.result-coords{color:#54709d}.view-btn{border:0;border-radius:10px;background:#edf4ff;color:#1552a2;padding:10px 12px;font-weight:800;cursor:pointer}.map-pane{position:relative;padding:14px}.map-container,#map{height:100%;min-height:620px;border-radius:16px;overflow:hidden}.map-badge{position:absolute;z-index:500;top:28px;left:28px;background:#fff;padding:10px 14px;border-radius:10px;box-shadow:0 5px 18px #163b6d22;font-size:13px;font-weight:800}.map-ctl{position:absolute;z-index:500;bottom:30px;left:30px;border:0;background:#fff;border-radius:10px;padding:11px 14px;box-shadow:0 5px 18px #163b6d22;color:#173e7d;font-weight:900;cursor:pointer}.features{margin-top:18px;background:#f0f5fd;border-radius:17px;padding:20px 28px;display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.feat{display:flex;gap:12px;align-items:center;border-right:1px solid #d7e2f2}.feat:last-child{border:0}.feat-ico{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;background:#dff5ff;font-size:22px}.feat b{font-size:13px}.feat small{display:block;color:#7585a5;margin-top:3px}.footer{display:flex;justify-content:space-between;padding:24px 4px 0;color:#7180a2;font-size:13px}.footer b{color:#0b87c9}.toast{position:fixed;right:20px;bottom:20px;background:#fff;padding:12px 16px;border-radius:10px;box-shadow:0 10px 30px #0002;opacity:0;transform:translateY(10px);transition:.2s;z-index:999}.toast.show{opacity:1;transform:none}.empty-state{text-align:center;color:#7b88a4;padding:70px 10px}@media(max-width:900px){.stats{grid-template-columns:1fr}.workspace{grid-template-columns:1fr}.left{border-right:0}.map-container,#map{min-height:430px}.features{grid-template-columns:1fr 1fr}.feat{border:0}.brand h1{font-size:26px}}@media(max-width:560px){.top{padding:18px 16px 75px}.date{display:none}.shell{padding:0 12px 20px}.logo{width:54px;height:54px}.brand h1{font-size:23px}.tag{font-size:13px}.left{padding:16px}.result-item{grid-template-columns:34px 1fr}.view-btn{grid-column:2;width:100%}.features{grid-template-columns:1fr}.searchbar{grid-template-columns:1fr}.search-btn{height:44px}}
+</style></head><body><div class="top"><div class="header"><div class="brand"><div class="logo">📍</div><div><h1>FDP <span>GeoLocator</span></h1><div class="tag">Find · Explore · Connect FDP Locations</div></div></div><div class="date" id="dateBox">📅 Today</div></div></div>
+<main class="shell"><section class="stats"><div class="stat"><div class="stat-ico">🗂️</div><div><div class="stat-label">Total FDP</div><div class="stat-num" id="totalFDP">0</div><div class="stat-sub">Total registered FDP locations</div></div></div><div class="stat"><div class="stat-ico">🔎</div><div><div class="stat-label">Search Results</div><div class="stat-num" id="searchResults">0</div><div class="stat-sub">FDP matched your search</div></div></div><div class="stat"><div class="stat-ico">📍</div><div><div class="stat-label">Areas Covered</div><div class="stat-num" id="areaCount">0</div><div class="stat-sub">Sections / Areas</div></div></div></section>
+<section class="workspace"><div class="left"><div class="search-title">🔎 Search FDP Location</div><div class="search-sub">Search by FDP Name, Street or Section</div><div class="searchbar"><input id="searchInput" class="search-input" placeholder="Try: FDP name, street or section..."><button class="search-btn" onclick="handleSearch()">⌕ Search</button></div><div class="filter-row"><div class="filter-chip">All FDP Locations</div><button id="reloadBtn" class="reload-btn">↻ Reload Data</button></div><div class="results-head"><span>☷ Search Results <span class="badge">(<span id="resultBadge">0</span>)</span></span><span style="font-size:12px;color:#8290ae">FDP List</span></div><div id="resultsSection" class="results-section"></div></div><div class="map-pane"><div class="map-badge">● <span id="mapCount">0 FDP locations shown</span></div><button id="fitBtn" class="map-ctl">⛶ Fit All Markers</button><div class="map-container"><div id="map"></div></div></div></section>
+<section class="features"><div class="feat"><div class="feat-ico">⌖</div><div><b>Quick Search</b><small>Find FDP by name, street or section</small></div></div><div class="feat"><div class="feat-ico">🗺</div><div><b>Interactive Map</b><small>View locations and map details</small></div></div><div class="feat"><div class="feat-ico">🧭</div><div><b>Get Directions</b><small>Open in Google Maps with one click</small></div></div><div class="feat"><div class="feat-ico">📍</div><div><b>Accurate Locations</b><small>Latest FDP location data</small></div></div></section><div class="footer"><div><b>FDP GeoLocator</b> &nbsp;|&nbsp; Find · Explore · Connect</div><div>© 2026 • NFF PBPS</div></div></main><div id="toast" class="toast">Done</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script><script>
     // ====== State ======
     let fdpData = [];
     let filteredData = [];
@@ -202,6 +15,7 @@
     // ====== Elements ======
     const searchInput = document.getElementById('searchInput');
     const reloadBtn = document.getElementById('reloadBtn');
+    const areaCountElement = document.getElementById('areaCount');
     const fitBtn = document.getElementById('fitBtn');
     const resultsSection = document.getElementById('resultsSection');
     const totalFDPElement = document.getElementById('totalFDP');
@@ -210,7 +24,7 @@
 
     // ====== Events ======
     searchInput.addEventListener('input', handleSearch);
-    reloadBtn.addEventListener('click', loadCSVFromSite);
+    reloadBtn?.addEventListener('click', loadCSVFromSite);
     fitBtn.addEventListener('click', fitToMarkers);
 
     // ====== Init Map ======
@@ -308,6 +122,7 @@
     function updateStats() {
       totalFDPElement.textContent = fdpData.length;
       searchResultsElement.textContent = filteredData.length;
+      if(areaCountElement) areaCountElement.textContent = new Set(fdpData.map(x=>x.section).filter(x=>x && x!=='Unknown')).size;
     }
 
     // ====== Map ======
@@ -349,44 +164,20 @@
 
     // ====== Results UI ======
     function renderList() {
-      if (filteredData.length === 0) {
-        resultsSection.innerHTML = `
-          <div class="list">
-            <div class="row header">
-              <div>FDP Name</div><div class="muted">Street</div>
-              <div class="muted">Section</div><div class="muted">Coordinates</div>
-              <div class="muted" style="text-align:right">Actions</div>
-            </div>
-            <div class="empty-state">
-              <h3>${fdpData.length === 0 ? 'No FDP Data' : 'No Results'}</h3>
-              <p>${fdpData.length === 0 ? 'Click “Reload Data” to fetch /FDP_Locations.csv' : 'Try different keywords or simplify your search'}</p>
-            </div>
-          </div>`;
-        return;
-      }
-
-      const header = `
-        <div class="row header">
-          <div>FDP Name</div>
-          <div class="muted">Street</div>
-          <div class="muted">Section</div>
-          <div class="muted">Coordinates</div>
-          <div class="muted" style="text-align:right">Actions</div>
-        </div>`;
-
+      const count = filteredData.length;
       const rows = filteredData.map((fdp,i) => `
-        <div class="row">
-          <div class="title">${escapeHTML(fdp.nama)}</div>
-          <div class="muted"><span class="label">Street:</span> ${escapeHTML(fdp.jalan)}</div>
-          <div class="muted"><span class="label">Section:</span> ${escapeHTML(fdp.section)}</div>
-          <div class="coords"><span class="label">Coords:</span> ${fdp.lat.toFixed(6)}, ${fdp.lng.toFixed(6)}</div>
-          <div class="actions">
-            <button class="btn btn-info btn-small" onclick="showOnMap(${fdp.lat}, ${fdp.lng}, '${escapeAttr(fdp.nama)}', filteredData[${i}])">📍 Map</button>
-            <a class="btn btn-success btn-small" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${fdp.lat},${fdp.lng}">🧭 Navigate</a>
+        <div class="result-item">
+          <div class="num">${i+1}</div>
+          <div class="result-copy">
+            <div class="result-name">${escapeHTML(fdp.nama)}</div>
+            <div class="result-meta">${escapeHTML(fdp.jalan)} · ${escapeHTML(fdp.section)}</div>
+            <div class="result-coords">📍 ${fdp.lat.toFixed(6)}, ${fdp.lng.toFixed(6)}</div>
           </div>
+          <button class="view-btn" onclick="showOnMap(${fdp.lat}, ${fdp.lng}, '${escapeAttr(fdp.nama)}', filteredData[${i}])">🗺 View on Map</button>
         </div>`).join('');
-
-      resultsSection.innerHTML = `<div class="list">${header}${rows}</div>`;
+      resultsSection.innerHTML = count ? rows : `<div class="empty-state"><h3>${fdpData.length ? 'No Results' : 'No FDP Data'}</h3><p>${fdpData.length ? 'Try a different keyword.' : 'Reload data to fetch FDP_Locations.csv'}</p></div>`;
+      const badge=document.getElementById('resultBadge'); if(badge) badge.textContent=count;
+      const mapCount=document.getElementById('mapCount'); if(mapCount) mapCount.textContent=count+' FDP locations shown';
     }
 
     // ====== Utils & Boot ======
@@ -398,6 +189,4 @@
       initMap();
       loadCSVFromSite();
     });
-  </script>
-</body>
-</html>
+  </script><script>document.getElementById('dateBox').textContent='📅 '+new Date().toLocaleDateString('en-MY',{weekday:'short',day:'2-digit',month:'short',year:'numeric'});</script></body></html>
