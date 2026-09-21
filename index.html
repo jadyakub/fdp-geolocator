@@ -334,7 +334,7 @@
       return 'FDC';
     }
     function fiberIcon(kind){
-      const cfg={NODE:['#7c3aed','N'],FDC:['#059669','F'],JT:['#f59e0b','J'],DP:['#0b67d1','D']}[kind]||['#64748b','•'];
+      const cfg={NODE:['#7c3aed','N'],FDC:['#059669','F'],JT:['#f59e0b','J'],DB:['#0891b2','B'],DP:['#0b67d1','D']}[kind]||['#64748b','•'];
       return L.divIcon({className:'',html:`<div style="width:26px;height:26px;border-radius:50%;background:${cfg[0]};border:3px solid white;box-shadow:0 2px 8px #0005;color:white;font:900 11px/20px Arial;text-align:center">${cfg[1]}</div>`,iconSize:[26,26],iconAnchor:[13,13]});
     }
     function setFiberMode(mode){
@@ -511,7 +511,7 @@
         if(!isFinite(p.lat)||!isFinite(p.lng))return;
         const kind=fiberPointKind(p.name);
         const marker=L.marker([p.lat,p.lng],{icon:fiberIcon(kind),zIndexOffset:(kind==='DP'||kind==='JT')?900:0}).bindPopup(`<b>${escapeHTML(p.name)}</b><br>${kind}<br>${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`).addTo(fiberFullLayers);
-        if(kind==='DP'||kind==='JT')marker.on('click',ev=>{if(fiberMode==='measure'){if(ev.originalEvent){L.DomEvent.stopPropagation(ev.originalEvent);L.DomEvent.preventDefault(ev.originalEvent);}fiberFullMap.closePopup();addMeasurePoint([p.lat,p.lng]);return false;}});
+        if(kind==='DP'||kind==='DB'||kind==='JT')marker.on('click',ev=>{if(fiberMode==='measure'){if(ev.originalEvent){L.DomEvent.stopPropagation(ev.originalEvent);L.DomEvent.preventDefault(ev.originalEvent);}fiberFullMap.closePopup();addMeasurePoint([p.lat,p.lng]);return false;}});
         // Always show a compact DP name label on the full-screen fiber map.
         if(kind==='DP'){
           const dpLabel=(p.name.match(/DP\s*\d+[A-Z]?/i)||[p.name])[0].toUpperCase();
