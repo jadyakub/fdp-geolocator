@@ -349,6 +349,11 @@
       const cfg={NODE:['#7c3aed','N'],FDC:['#059669','F'],JT:['#f59e0b','J'],DP:['#0b67d1','D']}[kind]||['#64748b','•'];
       return L.divIcon({className:'',html:`<div style="width:26px;height:26px;border-radius:50%;background:${cfg[0]};border:3px solid white;box-shadow:0 2px 8px #0005;color:white;font:900 11px/20px Arial;text-align:center">${cfg[1]}</div>`,iconSize:[26,26],iconAnchor:[13,13]});
     }
+    function topologyDPLabel(name=''){
+      const n=String(name).toUpperCase();
+      const m=n.match(/DP\s*0*(\d+)([A-Z]?)/i);
+      return m?'DP'+String(parseInt(m[1],10)).padStart(4,'0')+(m[2]||''):String(name);
+    }
     function buildSmartTopology(net,g){
       const points=(net?.points||[]).filter(p=>isFinite(p.lat)&&isFinite(p.lng)).map((p,idx)=>{
         const kind=fiberPointKind(p.name),snap=nearestGraphNodeAny(g,[p.lat,p.lng]);
@@ -370,11 +375,12 @@
       return total?Math.round(ok/total*100)+'% ('+ok+'/'+total+' DP)':'No DP';
     }
     function showTopologyIntelligence(){
+      try{
       if(!currentTopology){showToast('Topology not ready');return;}
       fiberMode='topology';document.getElementById('traceBtn')?.classList.remove('active');document.getElementById('measureBtn')?.classList.remove('active');document.getElementById('topologyBtn')?.classList.add('active');
       const t=currentTopology,c=t.counts;
       const rows=t.dpLinks.slice().sort((a,b)=>String(a.dp.name).localeCompare(String(b.dp.name))).map(x=>
-        '<div class="analysis-row"><b>'+escapeHTML(dpToken(x.dp.name)||x.dp.name)+'</b><span>'+(x.target?escapeHTML(x.target.name)+' · '+fmtM(x.distance):'⚠ Not connected')+'</span></div>'
+        '<div class="analysis-row"><b>'+escapeHTML(topologyDPLabel(x.dp.name))+'</b><span>'+(x.target?escapeHTML(x.target.name)+' · '+fmtM(x.distance):'⚠ Not connected')+'</span></div>'
       ).join('');
       showToolPanel('<h3>🧠 Smart Topology</h3>'+
         '<div class="analysis-row"><b>TM Node / OLT</b><span>'+c.NODE+'</span></div>'+
@@ -384,6 +390,7 @@
         '<div class="analysis-row"><b>DP Connectivity</b><span>'+topologyStatus()+'</span></div>'+
         '<div style="font-size:11px;color:#7180a2;margin:8px 0">Derived from KMZ geometry. “Not connected” means the current KMZ lines do not form a continuous graph to an FDC/TM Node.</div>'+
         '<div style="max-height:260px;overflow:auto;border-top:1px solid #edf1f8">'+rows+'</div>');
+      }catch(err){console.error('Topology panel error',err);showToast('Topology error: '+err.message);}
     }
     function setFiberMode(mode){
       fiberMode=mode;
