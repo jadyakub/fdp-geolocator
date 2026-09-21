@@ -399,12 +399,24 @@
       measurePoints.push({raw:[...raw],p:[...raw],name:'Manual',kind:'MANUAL'});
       renderMeasurement();
     }
+    function copyMeasureGPS(idx){
+      const item=measurePoints[idx];if(!item)return;
+      const gps=item.p[0].toFixed(6)+', '+item.p[1].toFixed(6);
+      if(navigator.clipboard?.writeText)navigator.clipboard.writeText(gps).then(()=>showToast('GPS copied: '+gps)).catch(()=>fallbackCopyGPS(gps));
+      else fallbackCopyGPS(gps);
+    }
+    function fallbackCopyGPS(gps){const t=document.createElement('textarea');t.value=gps;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();showToast('GPS copied: '+gps);}
+    function openMeasureGPS(idx){const item=measurePoints[idx];if(!item)return;window.open('https://www.google.com/maps?q='+item.p[0]+','+item.p[1], '_blank','noopener');}
+    function measurePointPopup(idx){
+      const item=measurePoints[idx],gps=item.p[0].toFixed(6)+', '+item.p[1].toFixed(6);
+      return '<b>📍 Point P'+(idx+1)+'</b><br><span style="font-family:monospace">'+gps+'</span><br><div style="display:flex;gap:6px;margin-top:8px"><button onclick="copyMeasureGPS('+idx+')" style="border:0;border-radius:7px;padding:6px 8px;background:#eef4ff;color:#174b8f;font-weight:800;cursor:pointer">📋 Copy GPS</button><button onclick="openMeasureGPS('+idx+')" style="border:0;border-radius:7px;padding:6px 8px;background:#0b67d1;color:#fff;font-weight:800;cursor:pointer">🗺 Maps</button></div>';
+    }
     function renderMeasurement(){
       measureMarkerLayer?.clearLayers();measureLineLayer?.clearLayers();measureTotal=0;
       measurePoints.forEach((item,idx)=>{
         const html='<div style="width:26px;height:26px;border-radius:50%;background:#7c3aed;color:#fff;border:3px solid #fff;box-shadow:0 2px 7px #0005;display:flex;align-items:center;justify-content:center;font:bold 12px Arial">'+(idx+1)+'</div>';
         const marker=L.marker(item.p,{draggable:true,zIndexOffset:3000,icon:L.divIcon({className:'',html,iconSize:[26,26],iconAnchor:[13,13]})}).addTo(measureMarkerLayer);
-        marker.bindTooltip('P'+(idx+1),{direction:'top',offset:[0,-14],className:'measure-label',opacity:1});
+        marker.bindTooltip('P'+(idx+1),{direction:'top',offset:[0,-14],className:'measure-label',opacity:1});marker.bindPopup(()=>measurePointPopup(idx),{closeButton:true});
         marker.on('drag',ev=>{
           const ll=ev.target.getLatLng();item.p=[ll.lat,ll.lng];item.raw=[ll.lat,ll.lng];
           renderMeasurementLinesOnly();
@@ -428,7 +440,10 @@
         L.marker(mid,{interactive:false,icon:L.divIcon({className:'',html:'<div class="measure-distance-badge">'+fmtM(d)+'</div>',iconSize:[64,24],iconAnchor:[32,28]})}).addTo(measureLineLayer);
       }
       const info=document.getElementById('measureInfo');
-      if(info)info.innerHTML='<b>Points:</b> '+measurePoints.length+'<br><b>Total Distance:</b> '+fmtM(measureTotal)+'<br><small>Manual measure: P1 → P2 → P3. Add a point at each bend to follow the fiber route.</small>';
+      if(info){
+        const gpsRows=measurePoints.map((x,i)=>'<div style="display:flex;align-items:center;gap:5px;margin-top:5px;font-size:11px"><b style="min-width:22px">P'+(i+1)+'</b><span style="font-family:monospace;flex:1">'+x.p[0].toFixed(6)+', '+x.p[1].toFixed(6)+'</span><button onclick="copyMeasureGPS('+i+')" title="Copy GPS" style="border:0;background:#eef4ff;border-radius:5px;padding:3px 6px;cursor:pointer">📋</button></div>').join('');
+        info.innerHTML='<b>Points:</b> '+measurePoints.length+'<br><b>Total Distance:</b> '+fmtM(measureTotal)+'<br><small>Manual measure: P1 → P2 → P3. Add a point at each bend to follow the fiber route.</small>'+(gpsRows?'<div style="margin-top:8px;border-top:1px solid #edf1f8;padding-top:5px">'+gpsRows+'</div>':'');
+      }
     }
     function redrawMeasure(){renderMeasurement();}
     function undoMeasurePoint(){if(measurePoints.length){measurePoints.pop();renderMeasurement();}}
