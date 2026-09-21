@@ -33,16 +33,17 @@
     let map, markersLayer, lastHighlighted;
     let fiberLayer, fiberHighlightLayer, fiberPointLayer, fiberNetwork=null;
     let fiberFullMap=null, fiberFullLayers=null, fiberFullBounds=null;
+    const fiberNetworkCache = new Map();
     const FIBER_FILES = [
       {prefix:'NBN_C001',  file:'NBN_C001_ES_DS_ROUTE.kmz',  source:'NBN C001'},
       {prefix:'NBN_C002',  file:'NBN_C002_ES_DS_ROUTE.kmz',  source:'NBN C002'},
       {prefix:'NBN_C003',  file:'NBN_C003_ES_DS_ROUTE.kmz',  source:'NBN C003'},
-      {prefix:'NBN_C004',  file:'NBN_C004_ES_DS_ROUTE.kmz',  source:'NBN C004'},
+      {prefix:'NBN_C004',  file:'NBN_C004 ES_DS ROUTE.kmz',  source:'NBN C004'},
       {prefix:'NBN_C005',  file:'NBN_C005_ES_DS_ROUTE.kmz',  source:'NBN C005M'},
       {prefix:'NBN_C006',  file:'NBN_C006_ES_DS_ROUTE.kmz',  source:'NBN C006'},
       {prefix:'NBN_C007',  file:'NBN_C007_ES_DS_ROUTE.kmz',  source:'NBN C007'},
-      {prefix:'NBN_C009',  file:'NBN_C009_ES_DS_ROUTE.kmz',  source:'NBN C009'},
-      {prefix:'NBN_C010M', file:'NBN_C010M_ES_DS_ROUTE.kmz', source:'NBN C010M'}
+      {prefix:'NBN_C009',  file:'NBN_C009 ES_DS ROUTE.kmz',  source:'NBN C009'},
+      {prefix:'NBN_C010M', file:'NBN_C010M ES_DS ROUTE.kmz', source:'NBN C010M'}
     ];
 
     // ====== Elements ======
@@ -149,6 +150,60 @@
 
       filteredData = [...fdpData];
       updateStats(); renderList(); drawMarkers(); fitToMarkers();
+      syncFDPFromKMZ();
+    }
+
+
+    // ====== Auto-sync FDP/DP from registered KMZ files ======
+    // CSV remains the main database. Any DP found in KMZ but missing from CSV
+    // is added to the in-memory search list automatically (no CSV editing needed).
+    function normalizeFdpKey(s=''){
+      return String(s).toUpperCase().replace(/[\s-]+/g,'_').replace(/_+/g,'_').trim();
+    }
+    function extractDPName(pointName='', cfg){
+      const raw=String(pointName).trim();
+      const m=raw.match(/DP\s*0*\d+[A-Z]?/i);
+      if(!m)return null;
+      const dp=m[0].replace(/\s+/g,'').toUpperCase();
+      // Keep full existing name when it already contains the FDC prefix.
+      const normalized=normalizeFdpKey(raw);
+      if(normalized.includes(cfg.prefix)) return normalized;
+      return cfg.prefix+'_'+dp;
+    }
+    async function syncFDPFromKMZ(){
+      let added=0, failed=0;
+      const existing=new Set(fdpData.map(x=>normalizeFdpKey(x.nama)));
+      const jobs=FIBER_FILES.map(async cfg=>{
+        try{
+          const net=await loadFiberKMZ(cfg);
+          net.points.forEach(p=>{
+            if(fiberPointKind(p.name)!=='DP' || !isFinite(p.lat) || !isFinite(p.lng))return;
+            const nama=extractDPName(p.name,cfg);
+            if(!nama)return;
+            const key=normalizeFdpKey(nama);
+            if(existing.has(key))return;
+            existing.add(key);
+            fdpData.push({
+              nama,
+              jalan:'KMZ Fiber Route',
+              section:cfg.source,
+              lat:p.lat,
+              lng:p.lng,
+              _fromKMZ:true,
+              _search:(nama+' KMZ Fiber Route '+cfg.source).toLowerCase()
+            });
+            added++;
+          });
+        }catch(err){
+          failed++;
+          console.warn('KMZ auto-sync failed:',cfg.file,err);
+        }
+      });
+      await Promise.all(jobs);
+      filteredData=[...fdpData];
+      updateStats();renderList();drawMarkers();
+      if(added) showToast(added+' FDP added automatically from KMZ');
+      else if(failed) showToast('KMZ sync completed with '+failed+' file issue(s)');
     }
 
     // ====== Search & Stats ======
@@ -232,7 +287,7 @@
     function clearFiberRoute(){fiberHighlightLayer?.clearLayers();fiberPointLayer?.clearLayers();const c=document.getElementById('fiberCard');if(c){c.classList.remove('show');c.innerHTML='';}}
     function kmlColorToType(c=''){c=c.trim().toLowerCase();if(c.endsWith('0000ff'))return 'ES';if(c.endsWith('ff0000'))return 'DS';return 'UNKNOWN';}
     async function loadFiberKMZ(cfg){
-      if(fiberNetwork?.file===cfg.file)return fiberNetwork;
+      if(fiberNetworkCache.has(cfg.file))return fiberNetworkCache.get(cfg.file);
       const res=await fetch(cfg.file+'?ts='+Date.now(),{cache:'no-store'});if(!res.ok)throw new Error('KMZ HTTP '+res.status);
       const zip=await JSZip.loadAsync(await res.arrayBuffer());const kmlName=Object.keys(zip.files).find(n=>n.toLowerCase().endsWith('.kml'));if(!kmlName)throw new Error('KML not found in KMZ');
       const xml=new DOMParser().parseFromString(await zip.file(kmlName).async('text'),'text/xml');
@@ -240,7 +295,7 @@
       const maps={};xml.querySelectorAll('StyleMap').forEach(sm=>{const id=sm.getAttribute('id');let ref='';sm.querySelectorAll('Pair').forEach(p=>{if(p.querySelector('key')?.textContent==='normal')ref=(p.querySelector('styleUrl')?.textContent||'').replace('#','')});if(id)maps[id]=ref});
       const routes=[],points=[];
       xml.querySelectorAll('Placemark').forEach(pm=>{const name=pm.querySelector(':scope > name')?.textContent?.trim()||'';const su=(pm.querySelector(':scope > styleUrl')?.textContent||'').replace('#','');const ls=pm.querySelector('LineString coordinates');const pt=pm.querySelector('Point coordinates');if(ls){const coords=ls.textContent.trim().split(/\s+/).map(v=>{const [lng,lat]=v.split(',').map(Number);return [lat,lng]}).filter(x=>isFinite(x[0])&&isFinite(x[1]));let sid=maps[su]||su;routes.push({name,type:styles[sid]||'UNKNOWN',coords,length:routeLength(coords)});}else if(pt){const [lng,lat]=pt.textContent.trim().split(',').map(Number);points.push({name,lat,lng});}});
-      fiberNetwork={file:cfg.file,routes,points,cfg};return fiberNetwork;
+      fiberNetwork={file:cfg.file,routes,points,cfg};fiberNetworkCache.set(cfg.file,fiberNetwork);return fiberNetwork;
     }
     function buildGraph(routes){const nodes=[],adj=[];const getNode=(p)=>{let best=-1,bd=12;for(let i=0;i<nodes.length;i++){const d=haversine(nodes[i],p);if(d<bd){bd=d;best=i}}if(best<0){best=nodes.length;nodes.push(p);adj.push([])}return best};routes.forEach((r,ri)=>{for(let i=1;i<r.coords.length;i++){const a=getNode(r.coords[i-1]),b=getNode(r.coords[i]),w=haversine(r.coords[i-1],r.coords[i]);adj[a].push({to:b,w,ri});adj[b].push({to:a,w,ri});}});return{nodes,adj};}
     function nearestNode(g,p,max=40){let bi=-1,bd=Infinity;g.nodes.forEach((n,i)=>{const d=haversine(n,p);if(d<bd){bd=d;bi=i}});return bd<=max?{i:bi,d:bd}:null;}
