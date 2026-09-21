@@ -39,6 +39,7 @@
   <div id="fiberFullMap"></div>
   <div class="fiber-tools">
     <button id="traceBtn" class="fiber-tool-btn" onclick="setFiberMode('trace')">🔗 Trace Fiber</button>
+    <button id="topologyBtn" class="fiber-tool-btn" onclick="showTopologyIntelligence()">🧠 Topology</button>
     <button id="measureBtn" class="fiber-tool-btn" onclick="setFiberMode('measure')">📏 Measure</button>
     <button class="fiber-tool-btn" onclick="openFaultPanel()">⚠ Fault Location</button>
     <button class="fiber-tool-btn" onclick="clearFiberTools()">🧹 Clear</button>
@@ -54,7 +55,7 @@
     let map, markersLayer, lastHighlighted;
     let fiberLayer, fiberHighlightLayer, fiberPointLayer, fiberNetwork=null;
     let fiberFullMap=null, fiberFullLayers=null, fiberFullBounds=null;
-    let fiberToolLayers=null, measureMarkerLayer=null, measureLineLayer=null, currentFiberNet=null, currentFiberGraph=null, fiberMode='trace', measurePoints=[], measureTotal=0;
+    let fiberToolLayers=null, measureMarkerLayer=null, measureLineLayer=null, currentFiberNet=null, currentFiberGraph=null, currentTopology=null, fiberMode='trace', measurePoints=[], measureTotal=0;
     const fiberNetworkCache = new Map();
     const FIBER_FILES = [
       {prefix:'KGU_C001',  file:'KGU_C001 ES_DS ROUTE.kmz',  source:'KGU C001'},
@@ -348,10 +349,46 @@
       const cfg={NODE:['#7c3aed','N'],FDC:['#059669','F'],JT:['#f59e0b','J'],DP:['#0b67d1','D']}[kind]||['#64748b','•'];
       return L.divIcon({className:'',html:`<div style="width:26px;height:26px;border-radius:50%;background:${cfg[0]};border:3px solid white;box-shadow:0 2px 8px #0005;color:white;font:900 11px/20px Arial;text-align:center">${cfg[1]}</div>`,iconSize:[26,26],iconAnchor:[13,13]});
     }
+    function buildSmartTopology(net,g){
+      const points=(net?.points||[]).filter(p=>isFinite(p.lat)&&isFinite(p.lng)).map((p,idx)=>{
+        const kind=fiberPointKind(p.name),snap=nearestGraphNodeAny(g,[p.lat,p.lng]);
+        return {...p,idx,kind,graphNode:snap.i,snapDistance:snap.d};
+      });
+      const counts={NODE:0,FDC:0,JT:0,DP:0};points.forEach(p=>{if(counts[p.kind]!=null)counts[p.kind]++;});
+      const anchors=points.filter(p=>p.kind==='FDC'||p.kind==='NODE');
+      const dpLinks=points.filter(p=>p.kind==='DP').map(dp=>{
+        let best=null;
+        anchors.forEach(a=>{if(dp.graphNode<0||a.graphNode<0)return;const path=shortestPath(g,dp.graphNode,a.graphNode);if(path&&(!best||path.distance<best.distance))best={target:a,path,distance:path.distance+dp.snapDistance+a.snapDistance};});
+        return {dp,...best};
+      });
+      const connected=dpLinks.filter(x=>x.target),unconnected=dpLinks.filter(x=>!x.target);
+      return {points,counts,dpLinks,connected,unconnected};
+    }
+    function topologyStatus(){
+      if(!currentTopology)return 'Not analysed';
+      const total=currentTopology.counts.DP||0,ok=currentTopology.connected.length;
+      return total?Math.round(ok/total*100)+'% ('+ok+'/'+total+' DP)':'No DP';
+    }
+    function showTopologyIntelligence(){
+      if(!currentTopology){showToast('Topology not ready');return;}
+      fiberMode='topology';document.getElementById('traceBtn')?.classList.remove('active');document.getElementById('measureBtn')?.classList.remove('active');document.getElementById('topologyBtn')?.classList.add('active');
+      const t=currentTopology,c=t.counts;
+      const rows=t.dpLinks.slice().sort((a,b)=>String(a.dp.name).localeCompare(String(b.dp.name))).map(x=>
+        '<div class="analysis-row"><b>'+escapeHTML(dpToken(x.dp.name)||x.dp.name)+'</b><span>'+(x.target?escapeHTML(x.target.name)+' · '+fmtM(x.distance):'⚠ Not connected')+'</span></div>'
+      ).join('');
+      showToolPanel('<h3>🧠 Smart Topology</h3>'+
+        '<div class="analysis-row"><b>TM Node / OLT</b><span>'+c.NODE+'</span></div>'+
+        '<div class="analysis-row"><b>FDC</b><span>'+c.FDC+'</span></div>'+
+        '<div class="analysis-row"><b>JT</b><span>'+c.JT+'</span></div>'+
+        '<div class="analysis-row"><b>DP</b><span>'+c.DP+'</span></div>'+
+        '<div class="analysis-row"><b>DP Connectivity</b><span>'+topologyStatus()+'</span></div>'+
+        '<div style="font-size:11px;color:#7180a2;margin:8px 0">Derived from KMZ geometry. “Not connected” means the current KMZ lines do not form a continuous graph to an FDC/TM Node.</div>'+
+        '<div style="max-height:260px;overflow:auto;border-top:1px solid #edf1f8">'+rows+'</div>');
+    }
     function setFiberMode(mode){
       fiberMode=mode;
       document.getElementById('traceBtn')?.classList.toggle('active',mode==='trace');
-      document.getElementById('measureBtn')?.classList.toggle('active',mode==='measure');
+      document.getElementById('measureBtn')?.classList.toggle('active',mode==='measure');document.getElementById('topologyBtn')?.classList.remove('active');
       if(mode==='measure'){measurePoints=[];measureTotal=0;clearFiberTools(false);measureMarkerLayer?.clearLayers();measureLineLayer?.clearLayers();showToolPanel('<h3>📏 Measure Distance</h3><div id="measureInfo"><div class="measure-mobile-head"><div class="measure-mobile-summary"><b>0 Points</b> · <b>0 m</b></div><button id="measureGpsToggle" class="measure-gps-toggle" onclick="toggleMeasureGPS()">GPS Points ▼</button></div><div id="measureGpsList" class="measure-gps-list" style="display:none"></div><div class="measure-actions"><button class="action secondary" onclick="undoMeasurePoint()">↶ Undo</button><button class="action secondary" onclick="clearMeasure()">Clear</button></div></div>');}
       else {showToast('Trace mode: click red/blue fiber line');}
     }
@@ -512,8 +549,8 @@
       }
       fiberFullLayers.clearLayers();
       fiberToolLayers?.clearLayers();measureMarkerLayer?.clearLayers();measureLineLayer?.clearLayers();hideToolPanel();measurePoints=[];measureTotal=0;fiberMode='trace';
-      currentFiberNet=net;currentFiberGraph=buildGraph(net.routes);
-      document.getElementById('traceBtn')?.classList.add('active');document.getElementById('measureBtn')?.classList.remove('active');
+      currentFiberNet=net;currentFiberGraph=buildGraph(net.routes);currentTopology=buildSmartTopology(net,currentFiberGraph);
+      document.getElementById('traceBtn')?.classList.add('active');document.getElementById('measureBtn')?.classList.remove('active');document.getElementById('topologyBtn')?.classList.remove('active');document.getElementById('fiberFsSub').textContent='Full Network • ES + DS Cable • Topology '+topologyStatus();
       const pts=[];
       net.routes.forEach(r=>{
         const color=r.type==='ES'?'#ef4444':r.type==='DS'?'#0878ff':'#64748b';
@@ -541,7 +578,7 @@
     }
     function fitFiberFullscreen(){if(fiberFullMap&&fiberFullBounds&&fiberFullBounds.isValid())fiberFullMap.fitBounds(fiberFullBounds.pad(.08));}
     function closeFiberFullscreen(){
-      clearFiberTools();currentFiberNet=null;currentFiberGraph=null;
+      clearFiberTools();currentFiberNet=null;currentFiberGraph=null;currentTopology=null;
       const overlay=document.getElementById('fiberFullscreen');overlay.classList.remove('show');overlay.setAttribute('aria-hidden','true');document.body.style.overflow='';
     }
 
