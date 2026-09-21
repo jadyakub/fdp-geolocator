@@ -27,7 +27,12 @@
     const toastEl = document.getElementById('toast');
 
     // ====== Events ======
-    searchInput.addEventListener('input', handleSearch);
+    // Performance: debounce live search so typing stays responsive on mobile
+    let searchDebounceTimer = null;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(handleSearch, 280);
+    });
     reloadBtn?.addEventListener('click', loadCSVFromSite);
     fitBtn.addEventListener('click', fitToMarkers);
 
@@ -107,7 +112,8 @@
             nama: get('nama') || 'Unknown',
             jalan: get('jalan') || 'Unknown',
             section: get('section') || 'Unknown',
-            lat, lng
+            lat, lng,
+            _search: ((get('nama') || 'Unknown') + ' ' + (get('jalan') || 'Unknown') + ' ' + (get('section') || 'Unknown')).toLowerCase()
           });
         }
       }
@@ -119,12 +125,9 @@
     // ====== Search & Stats ======
     function handleSearch() {
       const q = searchInput.value.trim().toLowerCase();
-      filteredData = !q ? [...fdpData] : fdpData.filter(f =>
-        (f.nama || '').toLowerCase().includes(q) ||
-        (f.jalan || '').toLowerCase().includes(q) ||
-        (f.section || '').toLowerCase().includes(q)
-      );
-      updateStats(); renderList(); drawMarkers(); fitToMarkers();
+      filteredData = !q ? [...fdpData] : fdpData.filter(f => f._search.includes(q));
+      updateStats(); renderList(); drawMarkers();
+      if (filteredData.length <= 200) fitToMarkers();
       if(q && filteredData.length===1) setTimeout(()=>showFiberRouteForFDP(filteredData[0]),120); else clearFiberRoute();
     }
     function updateStats() {
@@ -173,7 +176,11 @@
     // ====== Results UI ======
     function renderList() {
       const count = filteredData.length;
-      const rows = filteredData.map((fdp,i) => `
+      // Performance: never create thousands of FDP cards at once.
+      // Search result count remains exact; only the first 60 cards are rendered.
+      const MAX_RENDERED_RESULTS = 60;
+      const visibleData = filteredData.slice(0, MAX_RENDERED_RESULTS);
+      const rows = visibleData.map((fdp,i) => `
         <div class="result-item">
           <div class="num">${i+1}</div>
           <div class="result-copy">
@@ -183,7 +190,8 @@
           </div>
           <div><button class="view-btn" onclick="showOnMap(${fdp.lat}, ${fdp.lng}, '${escapeAttr(fdp.nama)}', filteredData[${i}])">🗺 View on Map</button><button class="route-btn" onclick="showFiberRouteForFDP(filteredData[${i}])">🔵 Fiber Route</button></div>
         </div>`).join('');
-      resultsSection.innerHTML = count ? rows : `<div class="empty-state"><h3>${fdpData.length ? 'No Results' : 'No FDP Data'}</h3><p>${fdpData.length ? 'Try a different keyword.' : 'Reload data to fetch FDP_Locations.csv'}</p></div>`;
+      const more = count > MAX_RENDERED_RESULTS ? `<div style="padding:12px 14px;text-align:center;color:#6f7fa5;font-size:12px;font-weight:800">Showing first ${MAX_RENDERED_RESULTS} of ${count.toLocaleString()} results — refine search to narrow the list.</div>` : '';
+      resultsSection.innerHTML = count ? rows + more : `<div class="empty-state"><h3>${fdpData.length ? 'No Results' : 'No FDP Data'}</h3><p>${fdpData.length ? 'Try a different keyword.' : 'Reload data to fetch FDP_Locations.csv'}</p></div>`;
       const badge=document.getElementById('resultBadge'); if(badge) badge.textContent=count;
       const mapCount=document.getElementById('mapCount'); if(mapCount) mapCount.textContent=count+' FDP locations shown';
     }
