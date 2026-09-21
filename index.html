@@ -309,7 +309,16 @@
       xml.querySelectorAll('Placemark').forEach(pm=>{const name=pm.querySelector(':scope > name')?.textContent?.trim()||'';const su=(pm.querySelector(':scope > styleUrl')?.textContent||'').replace('#','');const ls=pm.querySelector('LineString coordinates');const pt=pm.querySelector('Point coordinates');if(ls){const coords=ls.textContent.trim().split(/\s+/).map(v=>{const [lng,lat]=v.split(',').map(Number);return [lat,lng]}).filter(x=>isFinite(x[0])&&isFinite(x[1]));let sid=maps[su]||su;routes.push({name,type:styles[sid]||'UNKNOWN',coords,length:routeLength(coords)});}else if(pt){const [lng,lat]=pt.textContent.trim().split(',').map(Number);points.push({name,lat,lng});}});
       fiberNetwork={file:cfg.file,routes,points,cfg};fiberNetworkCache.set(cfg.file,fiberNetwork);return fiberNetwork;
     }
-    function buildGraph(routes){const nodes=[],adj=[];const getNode=(p)=>{let best=-1,bd=12;for(let i=0;i<nodes.length;i++){const d=haversine(nodes[i],p);if(d<bd){bd=d;best=i}}if(best<0){best=nodes.length;nodes.push(p);adj.push([])}return best};routes.forEach((r,ri)=>{for(let i=1;i<r.coords.length;i++){const a=getNode(r.coords[i-1]),b=getNode(r.coords[i]),w=haversine(r.coords[i-1],r.coords[i]);adj[a].push({to:b,w,ri});adj[b].push({to:a,w,ri});}});return{nodes,adj};}
+    function buildGraph(routes){const nodes=[],adj=[];const getNode=(p)=>{let best=-1,bd=4;for(let i=0;i<nodes.length;i++){const d=haversine(nodes[i],p);if(d<bd){bd=d;best=i}}if(best<0){best=nodes.length;nodes.push(p);adj.push([])}return best};routes.forEach((r,ri)=>{for(let i=1;i<r.coords.length;i++){const a=getNode(r.coords[i-1]),b=getNode(r.coords[i]),w=haversine(r.coords[i-1],r.coords[i]);adj[a].push({to:b,w,ri});adj[b].push({to:a,w,ri});}});return{nodes,adj};}
+    function projectToSegment(p,a,b){
+      const lat0=p[0]*Math.PI/180, mx=111320*Math.cos(lat0), my=110540;
+      const px=p[1]*mx,py=p[0]*my,ax=a[1]*mx,ay=a[0]*my,bx=b[1]*mx,by=b[0]*my;
+      const dx=bx-ax,dy=by-ay,den=dx*dx+dy*dy;let t=den?((px-ax)*dx+(py-ay)*dy)/den:0;t=Math.max(0,Math.min(1,t));
+      const q=[(ay+t*dy)/my,(ax+t*dx)/mx];return{point:q,d:haversine(p,q),t};
+    }
+    function nearestRouteProjection(p,routeFilter=null){
+      let best=null;(currentFiberNet?.routes||[]).forEach((r,ri)=>{if(routeFilter&&r!==routeFilter)return;for(let i=1;i<r.coords.length;i++){const z=projectToSegment(p,r.coords[i-1],r.coords[i]);if(!best||z.d<best.d)best={...z,route:r,ri,seg:i-1,a:r.coords[i-1],b:r.coords[i]};}});return best;
+    }
     function nearestNode(g,p,max=40){let bi=-1,bd=Infinity;g.nodes.forEach((n,i)=>{const d=haversine(n,p);if(d<bd){bd=d;bi=i}});return bd<=max?{i:bi,d:bd}:null;}
     function shortestPath(g,start,end){const n=g.nodes.length,dist=Array(n).fill(Infinity),prev=Array(n).fill(null),used=Array(n).fill(false);dist[start]=0;for(let k=0;k<n;k++){let u=-1,b=Infinity;for(let i=0;i<n;i++)if(!used[i]&&dist[i]<b){b=dist[i];u=i}if(u<0||u===end)break;used[u]=true;for(const e of g.adj[u])if(dist[u]+e.w<dist[e.to]){dist[e.to]=dist[u]+e.w;prev[e.to]={u,ri:e.ri}}}if(!isFinite(dist[end]))return null;const edges=[];let v=end;while(v!==start&&prev[v]){edges.push({a:prev[v].u,b:v,ri:prev[v].ri});v=prev[v].u}return{distance:dist[end],edges:edges.reverse()};}
     function getFiberCfgForFDP(fdp){
@@ -343,6 +352,9 @@
     function nearestGraphNodeAny(g,p){let bi=-1,bd=Infinity;g.nodes.forEach((n,i)=>{const d=haversine(n,p);if(d<bd){bd=d;bi=i}});return {i:bi,d:bd};}
     function pointGraphNode(p){return nearestGraphNodeAny(currentFiberGraph,[p.lat,p.lng]);}
     function pathCoords(path,g){if(!path)return[];const out=[];path.edges.forEach(e=>{const a=g.nodes[e.a],b=g.nodes[e.b];if(!out.length)out.push(a);out.push(b)});return out;}
+    function routeEndpointNodes(route){
+      const a=nearestGraphNodeAny(currentFiberGraph,route.coords[0]),b=nearestGraphNodeAny(currentFiberGraph,route.coords[route.coords.length-1]);return[a.i,b.i].filter(i=>i>=0);
+    }
     function specialPoints(kind){return (currentFiberNet?.points||[]).filter(p=>fiberPointKind(p.name)===kind&&isFinite(p.lat)&&isFinite(p.lng));}
     function nearestByNetwork(startNode,kind){
       let best=null;
@@ -358,30 +370,52 @@
     function traceFiberRoute(route,latlng){
       if(!currentFiberGraph)return;
       clearFiberTools(false);fiberMode='trace';
-      const start=nearestGraphNodeAny(currentFiberGraph,[latlng.lat,latlng.lng]);
-      const jt=nearestByNetwork(start.i,'JT'),dp=nearestByNetwork(start.i,'DP');
-      const candidates=[jt&&{...jt,kind:'JT'},dp&&{...dp,kind:'DP'}].filter(Boolean).sort((a,b)=>a.distance-b.distance);
-      const best=candidates[0];
-      if(best)highlightNetworkPath(best,best.kind+' '+fmtM(best.distance));
+      // Always highlight the exact clicked fiber segment first.
+      L.polyline(route.coords,{color:'#16a34a',weight:10,opacity:.95,lineCap:'round',lineJoin:'round'}).addTo(fiberToolLayers);
+      const clickProj=nearestRouteProjection([latlng.lat,latlng.lng],route);
+      const starts=routeEndpointNodes(route);
+      let bestJT=null,bestDP=null;
+      starts.forEach(si=>{
+        const jt=nearestByNetwork(si,'JT'),dp=nearestByNetwork(si,'DP');
+        if(jt&&(!bestJT||jt.distance<bestJT.distance))bestJT=jt;
+        if(dp&&(!bestDP||dp.distance<bestDP.distance))bestDP=dp;
+      });
+      // Extend highlight only when graph connectivity is valid.
+      const candidates=[bestJT&&{...bestJT,kind:'JT'},bestDP&&{...bestDP,kind:'DP'}].filter(Boolean).sort((a,b)=>a.distance-b.distance);
+      if(candidates[0])highlightNetworkPath(candidates[0],candidates[0].kind+' '+fmtM(candidates[0].distance));
+      if(clickProj)L.circleMarker(clickProj.point,{radius:7,color:'#16a34a',weight:3,fillColor:'#fff',fillOpacity:1}).addTo(fiberToolLayers);
       showToolPanel('<h3>🔗 Fiber Connection Trace</h3>'+
-        '<div class="analysis-row"><b>Cable</b><span>'+escapeHTML(route.type)+' · '+escapeHTML(route.name||'Segment')+'</span></div>'+
-        '<div class="analysis-row"><b>Nearest JT</b><span>'+(jt?escapeHTML(jt.point.name)+' · '+fmtM(jt.distance):'Not found')+'</span></div>'+
-        '<div class="analysis-row"><b>Nearest DP</b><span>'+(dp?escapeHTML(dp.point.name)+' · '+fmtM(dp.distance):'Not found')+'</span></div>'+
-        '<div style="font-size:11px;color:#7180a2;margin-top:8px">Green = shortest fiber-network path to the nearest JT/DP.</div>');
+        '<div class="analysis-row"><b>Selected Cable</b><span>'+escapeHTML(route.type)+' · '+escapeHTML(route.name||'Segment')+'</span></div>'+
+        '<div class="analysis-row"><b>Segment Length</b><span>'+fmtM(route.length)+'</span></div>'+
+        '<div class="analysis-row"><b>Nearest JT</b><span>'+(bestJT?escapeHTML(bestJT.point.name)+' · '+fmtM(bestJT.distance):'Not connected')+'</span></div>'+
+        '<div class="analysis-row"><b>Nearest DP</b><span>'+(bestDP?escapeHTML(bestDP.point.name)+' · '+fmtM(bestDP.distance):'Not connected')+'</span></div>'+
+        '<div style="font-size:11px;color:#7180a2;margin-top:8px">Green line = selected fiber and connected path where KMZ topology joins.</div>');
     }
     function handleFiberMapClick(e){
       if(fiberMode!=='measure')return;
-      const p=[e.latlng.lat,e.latlng.lng];measurePoints.push(p);
-      L.circleMarker(p,{radius:6,color:'#0b67d1',weight:3,fillColor:'#fff',fillOpacity:1}).addTo(fiberToolLayers);
+      const raw=[e.latlng.lat,e.latlng.lng],proj=nearestRouteProjection(raw);
+      if(!proj){showToast('Fiber route not found');return;}
+      const p=proj.point;
+      const node=nearestGraphNodeAny(currentFiberGraph,p);
+      const item={p,node:node.i,raw,route:proj.route};
+      measurePoints.push(item);
+      L.circleMarker(p,{radius:7,color:'#0b67d1',weight:3,fillColor:'#fff',fillOpacity:1}).bindTooltip('P'+measurePoints.length,{permanent:true,direction:'top',className:'measure-label'}).addTo(fiberToolLayers);
+      if(proj.d>1)L.polyline([raw,p],{color:'#94a3b8',weight:2,dashArray:'3,5'}).addTo(fiberToolLayers);
       if(measurePoints.length>1){
-        const a=measurePoints[measurePoints.length-2],d=haversine(a,p);measureTotal+=d;
-        L.polyline([a,p],{color:'#7c3aed',weight:4,dashArray:'7,6'}).addTo(fiberToolLayers);
-        L.marker([(a[0]+p[0])/2,(a[1]+p[1])/2],{interactive:false,icon:L.divIcon({className:'',html:'<div class="measure-label">'+fmtM(d)+'</div>'})}).addTo(fiberToolLayers);
+        const prev=measurePoints[measurePoints.length-2];
+        const path=shortestPath(currentFiberGraph,prev.node,item.node);
+        let d,coords;
+        if(path&&path.edges.length){d=path.distance;coords=pathCoords(path,currentFiberGraph);}
+        else {d=haversine(prev.p,p);coords=[prev.p,p];}
+        measureTotal+=d;
+        L.polyline(coords,{color:'#7c3aed',weight:6,opacity:.9}).addTo(fiberToolLayers);
+        const mid=coords[Math.floor(coords.length/2)]||p;
+        L.marker(mid,{interactive:false,icon:L.divIcon({className:'',html:'<div class="measure-label">'+fmtM(d)+'</div>'})}).addTo(fiberToolLayers);
       }
-      const info=document.getElementById('measureInfo');if(info)info.innerHTML='<b>Points:</b> '+measurePoints.length+'<br><b>Total:</b> '+fmtM(measureTotal)+'<br><small>Click next point to continue.</small>';
+      const info=document.getElementById('measureInfo');if(info)info.innerHTML='<b>Points:</b> '+measurePoints.length+'<br><b>Total Fiber Distance:</b> '+fmtM(measureTotal)+'<br><small>Each click snaps to the nearest fiber line.</small>';
     }
     function redrawMeasure(){
-      const pts=[...measurePoints];fiberToolLayers.clearLayers();measureTotal=0;measurePoints=[];
+      const pts=measurePoints.map(x=>x.raw);fiberToolLayers.clearLayers();measureTotal=0;measurePoints=[];
       pts.forEach(p=>handleFiberMapClick({latlng:{lat:p[0],lng:p[1]}}));
     }
     function undoMeasurePoint(){if(measurePoints.length){measurePoints.pop();redrawMeasure();}}
