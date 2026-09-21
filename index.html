@@ -514,9 +514,9 @@
         const marker=L.marker([p.lat,p.lng],{icon:fiberIcon(kind),zIndexOffset:(kind==='DP'||kind==='JT')?900:0}).bindPopup(`<b>${escapeHTML(p.name)}</b><br>${kind}<br>${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`).addTo(fiberFullLayers);
         if(kind==='DP'||kind==='DB'||kind==='JT')marker.on('click',ev=>{if(fiberMode==='measure'){if(ev.originalEvent){L.DomEvent.stopPropagation(ev.originalEvent);L.DomEvent.preventDefault(ev.originalEvent);}fiberFullMap.closePopup();addMeasurePoint([p.lat,p.lng]);return false;}});
         // Always show a compact DP name label on the full-screen fiber map.
-        if(kind==='DP'){
-          const dpLabel=(p.name.match(/DP\s*\d+[A-Z]?/i)||[p.name])[0].toUpperCase();
-          marker.bindTooltip(escapeHTML(dpLabel),{permanent:true,direction:'top',offset:[0,-15],className:'dp-map-label',opacity:1});
+        if(kind==='DP'||kind==='DB'){
+          const pointLabel=(p.name.match(kind==='DB'?/DB\s*\d+[A-Z]?/i:/DP\s*\d+[A-Z]?/i)||[p.name])[0].toUpperCase();
+          marker.bindTooltip(escapeHTML(pointLabel),{permanent:true,direction:'top',offset:[0,-15],className:'dp-map-label',opacity:1});
         }
         pts.push([p.lat,p.lng]);
       });
