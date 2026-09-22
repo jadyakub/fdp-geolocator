@@ -622,8 +622,11 @@
       const src=findSourcePoint(net,cfg);
       if(!dp)throw new Error('DP/FDP point not found in fiber route');
       if(!src)throw new Error('FDC/source point not found in fiber route');
-      const ds=net.routes.filter(r=>r.type==='DS');
-      if(!ds.length)throw new Error('No DS cable route found');
+      // OTDR must also accept unclassified/grey FD route segments from the KMZ.
+      // They are still protected by the Joint/Closure-aware topology, so nearby
+      // crossings cannot connect unless a registered JT/Closure exists there.
+      const ds=net.routes.filter(r=>r.type==='DS'||r.type==='UNKNOWN');
+      if(!ds.length)throw new Error('No DS / FD cable route found');
 
       const resolved=findFaultPath(ds,net,dp,src);
       const g=resolved?.g,dn=resolved?.dn,sn=resolved?.sn,path=resolved?.path;
@@ -777,7 +780,7 @@
         if(faultAnimFrame)cancelAnimationFrame(faultAnimFrame);faultAnimFrame=null;faultLayer?.clearLayers();
         const route=buildOrderedDPtoFDCPath(currentFiberNet,currentFiberCfg,currentFiberFDP);
         const info=document.getElementById('faultRouteInfo');
-        if(info)info.innerHTML='<b>Route:</b> '+escapeHTML(route.dp.name)+' → '+escapeHTML(route.src.name)+'<br><b>Mapped DS length:</b> '+fmtM(route.distance)+'<br><span style="color:#8290ae">Topology: Joint/Closure aware</span>';
+        if(info)info.innerHTML='<b>Route:</b> '+escapeHTML(route.dp.name)+' → '+escapeHTML(route.src.name)+'<br><b>Mapped FD/DS length:</b> '+fmtM(route.distance)+'<br><span style="color:#8290ae">Topology: Joint/Closure aware</span>';
         if(dist>route.distance)throw new Error('OTDR distance exceeds mapped DP → FDC route ('+fmtM(route.distance)+')');
         const slice=routeSliceToDistance(route.coords,dist),target=pointAtRouteDistance(route.coords,dist).point;
         L.polyline(slice,{color:'#ef4444',weight:7,opacity:.95,lineCap:'round',lineJoin:'round',className:'otdr-trace'}).addTo(faultLayer);
