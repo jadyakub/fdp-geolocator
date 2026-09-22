@@ -509,85 +509,112 @@
         g.adj[b].push({to:a,w,ri,virtual});
       }
     }
-    function buildFaultGraph(routes,bridgeTolerance=24){
-      // Keep the normal 4 m graph untouched; OTDR gets a smarter graph that can
-      // bridge small KMZ drawing gaps between one route endpoint and another DS segment.
-      const nodes=[],adj=[],routeNodes=[];
-      const getNode=p=>{
-        let best=-1,bd=4;
-        for(let i=0;i<nodes.length;i++){
-          const d=haversine(nodes[i],p);
-          if(d<bd){bd=d;best=i;}
+    function bestProjectionOnRoute(point,route,ri){
+      let best=null;
+      for(let i=1;i<route.coords.length;i++){
+        const z=projectToSegment(point,route.coords[i-1],route.coords[i]);
+        if(!best||z.d<best.d){
+          const endGap=Math.min(haversine(z.point,route.coords[0]),haversine(z.point,route.coords[route.coords.length-1]));
+          best={...z,ri,seg:i-1,endGap};
         }
-        if(best<0){best=nodes.length;nodes.push([p[0],p[1]]);adj.push([]);}
-        return best;
-      };
+      }
+      return best;
+    }
+    function buildJointAwareFaultGraph(routes,net,dp,src){
+      // OTDR topology rules:
+      // 1) Different DS polylines NEVER connect just because they are close/cross.
+      // 2) They may change branch only through a registered JT/Closure.
+      // 3) DP and FDC are attached only to their nearby physical DS route(s).
+      const nodes=[],adj=[],routeVertexIds=[],segmentProjections=new Map();
+      const g={nodes,adj,jointAware:true};
 
       routes.forEach((r,ri)=>{
         const ids=[];
-        r.coords.forEach(p=>ids.push(getNode(p)));
-        routeNodes[ri]=ids;
+        r.coords.forEach(p=>{
+          const id=nodes.length;nodes.push([p[0],p[1]]);adj.push([]);ids.push(id);
+        });
+        routeVertexIds[ri]=ids;
         for(let i=1;i<ids.length;i++){
-          const a=ids[i-1],b=ids[i],w=haversine(r.coords[i-1],r.coords[i]);
-          addGraphEdge({nodes,adj},a,b,w,ri,false);
+          addGraphEdge(g,ids[i-1],ids[i],haversine(r.coords[i-1],r.coords[i]),ri,false);
         }
       });
 
-      const g={nodes,adj};
-      const originalNodeCount=nodes.length;
+      function addProjection(proj){
+        const id=nodes.length;nodes.push([proj.point[0],proj.point[1]]);adj.push([]);
+        const key=proj.ri+':'+proj.seg;
+        if(!segmentProjections.has(key))segmentProjections.set(key,[]);
+        segmentProjections.get(key).push({node:id,t:proj.t,point:proj.point,ri:proj.ri,seg:proj.seg});
+        return id;
+      }
+      function addHub(point){
+        const id=nodes.length;nodes.push([point[0],point[1]]);adj.push([]);return id;
+      }
+      function connectHubToProjection(hub,point,proj){
+        const projNode=addProjection(proj);
+        addGraphEdge(g,hub,projNode,haversine(point,proj.point),proj.ri,true);
+        return projNode;
+      }
+      function allowedJointProjection(z){
+        if(!z)return false;
+        if(z.d<=7)return true;
+        return z.d<=28&&z.endGap<=45;
+      }
 
-      // Only route ENDPOINTS are allowed to bridge. This avoids accidentally
-      // joining nearby parallel FD cables in the middle of their routes.
-      routes.forEach((r,ri)=>{
-        if(!r.coords?.length)return;
-        const endpointIndexes=[0,r.coords.length-1];
-        endpointIndexes.forEach(epIdx=>{
-          const ep=r.coords[epIdx];
-          const epNode=routeNodes[ri][epIdx];
-          let best=null;
+      const dpPoint=[dp.lat,dp.lng];
+      const dpCandidates=routes.map((r,ri)=>bestProjectionOnRoute(dpPoint,r,ri)).filter(Boolean)
+        .map(z=>({...z,score:z.d+Math.min(z.endGap,50)*0.15}))
+        .sort((x,y)=>x.score-y.score);
+      const dpBest=dpCandidates[0];
+      if(!dpBest||dpBest.d>70)throw new Error('Selected DP is too far from mapped DS cable');
+      const dpHub=addHub(dpPoint);
+      connectHubToProjection(dpHub,dpPoint,dpBest);
 
-          routes.forEach((other,ori)=>{
-            if(ori===ri||!other.coords||other.coords.length<2)return;
-            for(let si=1;si<other.coords.length;si++){
-              const z=projectToSegment(ep,other.coords[si-1],other.coords[si]);
-              if(z.d<=4||z.d>bridgeTolerance)continue;
-              if(!best||z.d<best.d)best={...z,ori,si};
-            }
-          });
-
-          if(!best)return;
-
-          const aNode=routeNodes[best.ori][best.si-1];
-          const bNode=routeNodes[best.ori][best.si];
-          const qNode=nodes.length;
-          nodes.push(best.point);adj.push([]);
-
-          const gap=haversine(ep,best.point);
-          const qa=haversine(best.point,nodes[aNode]);
-          const qb=haversine(best.point,nodes[bNode]);
-
-          addGraphEdge(g,epNode,qNode,gap,-1,true);
-          addGraphEdge(g,qNode,aNode,qa,best.ori,true);
-          addGraphEdge(g,qNode,bNode,qb,best.ori,true);
+      const joints=(net?.points||[]).filter(p=>fiberPointKind(p.name)==='JT'&&isFinite(p.lat)&&isFinite(p.lng));
+      let linkedJointCount=0;
+      joints.forEach(j=>{
+        const jp=[j.lat,j.lng];
+        const matches=routes.map((r,ri)=>bestProjectionOnRoute(jp,r,ri)).filter(allowedJointProjection);
+        if(!matches.length)return;
+        const hub=addHub(jp);
+        const seenRoutes=new Set();
+        matches.sort((x,y)=>x.d-y.d).forEach(z=>{
+          if(seenRoutes.has(z.ri))return;
+          seenRoutes.add(z.ri);
+          connectHubToProjection(hub,jp,z);
         });
+        if(seenRoutes.size>1)linkedJointCount++;
       });
 
-      g.smartBridge=true;
-      g.originalNodeCount=originalNodeCount;
-      return g;
+      const srcPoint=[src.lat,src.lng];
+      const srcMatches=routes.map((r,ri)=>bestProjectionOnRoute(srcPoint,r,ri)).filter(z=>{
+        if(!z)return false;
+        if(z.d<=8)return true;
+        return z.d<=35&&z.endGap<=55;
+      }).sort((x,y)=>x.d-y.d);
+      if(!srcMatches.length)throw new Error('FDC is too far from mapped DS cable');
+      const srcHub=addHub(srcPoint);
+      const srcSeen=new Set();
+      srcMatches.forEach(z=>{
+        if(srcSeen.has(z.ri))return;
+        srcSeen.add(z.ri);
+        connectHubToProjection(srcHub,srcPoint,z);
+      });
+
+      segmentProjections.forEach((list,key)=>{
+        const parts=key.split(':'),ri=+parts[0],seg=+parts[1];
+        const a=routeVertexIds[ri][seg],b=routeVertexIds[ri][seg+1];
+        const chain=[{node:a,t:0,point:routes[ri].coords[seg]},...list.sort((x,y)=>x.t-y.t),{node:b,t:1,point:routes[ri].coords[seg+1]}];
+        for(let i=1;i<chain.length;i++){
+          addGraphEdge(g,chain[i-1].node,chain[i].node,haversine(chain[i-1].point,chain[i].point),ri,false);
+        }
+      });
+
+      return {g,dpHub,srcHub,linkedJointCount};
     }
-    function findFaultPath(ds,dpPoint,srcPoint){
-      const attempts=[18,24,32];
-      let last=null;
-      for(const bridgeTolerance of attempts){
-        const g=buildFaultGraph(ds,bridgeTolerance);
-        const dn=nearestNode(g,dpPoint,70),sn=nearestNode(g,srcPoint,70);
-        if(!dn||!sn){last={g,dn,sn,path:null,bridgeTolerance};continue;}
-        const path=shortestPath(g,dn.i,sn.i);
-        if(path)return {g,dn,sn,path,bridgeTolerance};
-        last={g,dn,sn,path:null,bridgeTolerance};
-      }
-      return last;
+    function findFaultPath(ds,net,dp,src){
+      const built=buildJointAwareFaultGraph(ds,net,dp,src);
+      const path=shortestPath(built.g,built.dpHub,built.srcHub);
+      return {g:built.g,dn:{i:built.dpHub,d:0},sn:{i:built.srcHub,d:0},path,linkedJointCount:built.linkedJointCount,topologyMode:'joint-aware'};
     }
 
     function buildOrderedDPtoFDCPath(net,cfg,fdp){
@@ -598,10 +625,10 @@
       const ds=net.routes.filter(r=>r.type==='DS');
       if(!ds.length)throw new Error('No DS cable route found');
 
-      const resolved=findFaultPath(ds,[dp.lat,dp.lng],[src.lat,src.lng]);
+      const resolved=findFaultPath(ds,net,dp,src);
       const g=resolved?.g,dn=resolved?.dn,sn=resolved?.sn,path=resolved?.path;
       if(!dn||!sn)throw new Error('DP/FDC is not connected to DS topology');
-      if(!path)throw new Error('No DS path from '+(dp.name||fdp?.nama||'selected DP')+' to FDC. Check DS route continuity in KMZ.');
+      if(!path)throw new Error('No valid DP → JT/Closure → FDC path. Check the JT/Closure point or DS route continuity in KMZ.');
 
       // Start from the exact selected DP coordinate, then follow the DS graph to the one registered FDC.
       const coords=[[dp.lat,dp.lng]];
@@ -617,7 +644,7 @@
 
       const total=routeLength(coords);
       if(coords.length<2||total<=0)throw new Error('DS path is too short to calculate OTDR distance');
-      return {coords,distance:total,dp,src,bridgeTolerance:resolved?.bridgeTolerance||0};
+      return {coords,distance:total,dp,src,topologyMode:resolved?.topologyMode||'joint-aware',linkedJointCount:resolved?.linkedJointCount||0};
     }
 
     function pointAtRouteDistance(coords,targetM){
@@ -750,7 +777,7 @@
         if(faultAnimFrame)cancelAnimationFrame(faultAnimFrame);faultAnimFrame=null;faultLayer?.clearLayers();
         const route=buildOrderedDPtoFDCPath(currentFiberNet,currentFiberCfg,currentFiberFDP);
         const info=document.getElementById('faultRouteInfo');
-        if(info)info.innerHTML='<b>Route:</b> '+escapeHTML(route.dp.name)+' → '+escapeHTML(route.src.name)+'<br><b>Mapped DS length:</b> '+fmtM(route.distance)+(route.bridgeTolerance?'<br><span style="color:#8290ae">Topology auto-link: active</span>':'');
+        if(info)info.innerHTML='<b>Route:</b> '+escapeHTML(route.dp.name)+' → '+escapeHTML(route.src.name)+'<br><b>Mapped DS length:</b> '+fmtM(route.distance)+'<br><span style="color:#8290ae">Topology: Joint/Closure aware</span>';
         if(dist>route.distance)throw new Error('OTDR distance exceeds mapped DP → FDC route ('+fmtM(route.distance)+')');
         const slice=routeSliceToDistance(route.coords,dist),target=pointAtRouteDistance(route.coords,dist).point;
         L.polyline(slice,{color:'#ef4444',weight:7,opacity:.95,lineCap:'round',lineJoin:'round',className:'otdr-trace'}).addTo(faultLayer);
