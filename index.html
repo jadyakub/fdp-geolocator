@@ -477,8 +477,14 @@
       const key=normalizeFiberName(name);
       let p=net.points.find(x=>normalizeFiberName(x.name)===key);
       if(p)return p;
-      const short=(key.match(/(?:DP|DB)\d+[A-Z]?/i)||[])[0];
-      if(short)p=net.points.find(x=>normalizeFiberName(x.name).includes(short.toUpperCase()));
+      const short=((key.match(/(?:DP|DB)\d+[A-Z]?/i)||[])[0]||'').toUpperCase();
+      if(!short)return null;
+      const pointCode=x=>(((normalizeFiberName(x?.name||'').match(/(?:DP|DB)\d+[A-Z]?/i)||[])[0]||'').toUpperCase());
+      // Exact DP/DB code match is mandatory first: DP0001 must NOT resolve to DP0001A.
+      p=net.points.find(x=>pointCode(x)===short);
+      if(p)return p;
+      // Last-resort compatibility fallback for unusual KMZ labels only.
+      p=net.points.find(x=>normalizeFiberName(x.name).split('_').includes(short));
       return p||null;
     }
     function findSourcePoint(net,cfg){
