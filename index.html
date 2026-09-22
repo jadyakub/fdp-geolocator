@@ -356,71 +356,131 @@
       });
       const repairs=[],insertions=new Map();
 
-      const supportDistance=(a,b)=>{
-        let best=Infinity;
-        supportPoints.forEach(p=>{
-          const pp=[p.lat,p.lng];
-          best=Math.min(best,haversine(pp,a),haversine(pp,b));
-        });
-        return best;
+      const pushInsertion=(ri,seg,t,point)=>{
+        const key=ri+':'+seg;
+        if(!insertions.has(key))insertions.set(key,[]);
+        insertions.get(key).push({t,point:[point[0],point[1]]});
       };
-      const bestOnOtherRoutes=(ep,sourceRi)=>{
-        const list=[];
+      const isAlreadyConnected=(ep,sourceRi)=>{
+        return eligible.some(({r,ri})=>{
+          if(ri===sourceRi)return false;
+          const z=bestProjectionOnRoute(ep,r,ri);
+          return !!z&&z.d<=3.5;
+        });
+      };
+      const nearestPlantAnchors=ep=>supportPoints.map(p=>({
+        p,
+        kind:fiberPointKind(p.name),
+        point:[p.lat,p.lng],
+        d:haversine(ep,[p.lat,p.lng])
+      })).filter(x=>x.d<=30).sort((x,y)=>x.d-y.d);
+
+      const targetRoutesAtAnchor=(anchor,sourceRi,sourceType)=>{
+        const hits=[];
         eligible.forEach(({r,ri})=>{
           if(ri===sourceRi||!r.coords||r.coords.length<2)return;
-          const z=bestProjectionOnRoute(ep,r,ri);
-          if(!z||z.d<=3.5||z.d>maxGap)return;
-          const support=supportDistance(ep,z.point);
-          if(support>35&&z.endGap>maxGap)return;
-          list.push({...z,support});
+          const z=bestProjectionOnRoute(anchor.point,r,ri);
+          if(!z||z.d>8)return;
+          const sameType=r.type===sourceType;
+          hits.push({...z,routeType:r.type,sameType,score:z.d+(sameType?0:4)});
         });
-        return list.sort((a,b)=>a.d-b.d);
+        return hits.sort((x,y)=>x.score-y.score);
+      };
+
+      const endpointFallback=(ep,sourceRi,sourceType)=>{
+        const candidates=[];
+        eligible.forEach(({r,ri})=>{
+          if(ri===sourceRi||!r.coords||r.coords.length<2)return;
+          [r.coords[0],r.coords[r.coords.length-1]].forEach((targetPoint,targetEndpointIndex)=>{
+            const d=haversine(ep,targetPoint);
+            if(d<=3.5||d>14)return;
+            const sameType=r.type===sourceType;
+            if(!sameType&&d>7)return;
+            candidates.push({ri,r,targetPoint:[targetPoint[0],targetPoint[1]],targetEndpointIndex,d,sameType,score:d+(sameType?0:5)});
+          });
+        });
+        candidates.sort((x,y)=>x.score-y.score);
+        if(!candidates.length)return null;
+        const best=candidates[0],second=candidates[1];
+        if(second&&second.score<best.score+5)return null;
+        return best;
       };
 
       eligible.forEach(({r,ri})=>{
         if(!r.coords||r.coords.length<2)return;
         [0,r.coords.length-1].forEach(endpointIndex=>{
           const ep=r.coords[endpointIndex];
+          if(isAlreadyConnected(ep,ri))return;
 
-          let alreadyConnected=false;
-          eligible.forEach(({r:other,ri:oi})=>{
-            if(oi===ri||alreadyConnected)return;
-            const z=bestProjectionOnRoute(ep,other,oi);
-            if(z&&z.d<=3.5)alreadyConnected=true;
-          });
-          if(alreadyConnected)return;
+          let repair=null;
 
-          const candidates=bestOnOtherRoutes(ep,ri);
-          if(!candidates.length)return;
-          const best=candidates[0],second=candidates[1];
-          if(second && second.d<best.d+7 && second.d<best.d*1.65)return;
+          // Primary rule: a dangling endpoint near a registered DP/DB/JT/FDC
+          // must use that plant point as its anchor. This prevents a nearby
+          // parallel/crossing cable from stealing the connection.
+          const anchors=nearestPlantAnchors(ep);
+          for(const anchor of anchors){
+            const targets=targetRoutesAtAnchor(anchor,ri,r.type);
+            if(!targets.length)continue;
+            const best=targets[0],second=targets[1];
 
+            // If two cables are equally plausible at the same plant point,
+            // do not guess unless one has the same visual cable class.
+            if(second&&second.score<best.score+3&&best.sameType===second.sameType)continue;
+
+            const coords=[[ep[0],ep[1]]];
+            if(haversine(coords[coords.length-1],anchor.point)>0.4)coords.push([anchor.point[0],anchor.point[1]]);
+            if(haversine(coords[coords.length-1],best.point)>0.4)coords.push([best.point[0],best.point[1]]);
+            if(coords.length<2)continue;
+
+            repair={
+              name:'AUTO CONNECTION',
+              type:r.type==='UNKNOWN'?'UNKNOWN':'DS',
+              coords,
+              length:routeLength(coords),
+              _autoRepair:true,
+              _repairMode:'plant-anchor',
+              _anchorName:anchor.p.name,
+              _sourceRouteIndex:ri,
+              _targetRouteIndex:best.ri,
+              _targetSeg:best.seg,
+              _targetT:best.t,
+              from:[ep[0],ep[1]],
+              to:[best.point[0],best.point[1]]
+            };
+            pushInsertion(best.ri,best.seg,best.t,best.point);
+            break;
+          }
+
+          // Secondary rule: only endpoint-to-endpoint gaps, with strict distance
+          // and uniqueness checks. Never jump to an arbitrary route interior.
+          if(!repair){
+            const fallback=endpointFallback(ep,ri,r.type);
+            if(fallback){
+              repair={
+                name:'AUTO CONNECTION',
+                type:r.type==='UNKNOWN'?'UNKNOWN':'DS',
+                coords:[[ep[0],ep[1]],fallback.targetPoint],
+                length:haversine(ep,fallback.targetPoint),
+                _autoRepair:true,
+                _repairMode:'endpoint',
+                _sourceRouteIndex:ri,
+                _targetRouteIndex:fallback.ri,
+                from:[ep[0],ep[1]],
+                to:[fallback.targetPoint[0],fallback.targetPoint[1]]
+              };
+            }
+          }
+
+          if(!repair)return;
           const duplicate=repairs.some(x=>
-            (haversine(x.from,ep)<2&&haversine(x.to,best.point)<2)||
-            (haversine(x.from,best.point)<2&&haversine(x.to,ep)<2)
+            (haversine(x.from,repair.from)<2&&haversine(x.to,repair.to)<2)||
+            (haversine(x.from,repair.to)<2&&haversine(x.to,repair.from)<2)
           );
-          if(duplicate)return;
-
-          const repair={
-            name:'AUTO CONNECTION',
-            type:r.type==='UNKNOWN'?'UNKNOWN':'DS',
-            coords:[[ep[0],ep[1]],[best.point[0],best.point[1]]],
-            length:haversine(ep,best.point),
-            _autoRepair:true,
-            _sourceRouteIndex:ri,
-            _targetRouteIndex:best.ri,
-            _targetSeg:best.seg,
-            _targetT:best.t,
-            from:[ep[0],ep[1]],
-            to:[best.point[0],best.point[1]]
-          };
-          repairs.push(repair);
-          const key=best.ri+':'+best.seg;
-          if(!insertions.has(key))insertions.set(key,[]);
-          insertions.get(key).push({t:best.t,point:[best.point[0],best.point[1]]});
+          if(!duplicate)repairs.push(repair);
         });
       });
 
+      // Split target segments exactly at plant-anchored repaired junctions.
       const grouped=new Map();
       insertions.forEach((items,key)=>{
         const parts=key.split(':'),ri=+parts[0],seg=+parts[1];
@@ -976,7 +1036,7 @@
         const color=r.type==='ES'?'#ef4444':r.type==='DS'?'#0878ff':'#64748b';
         const line=L.polyline(r.coords,{color,weight:5,opacity:.92,lineCap:'round',lineJoin:'round'})
           .bindPopup(r._autoRepair
-            ? `<b>Auto Repaired Connection</b><br>Gap connected: ${fmtM(r.length)}<br><small>Used by Trace Fiber & OTDR topology</small>`
+            ? `<b>Auto Repaired Connection</b><br>Gap connected: ${fmtM(r.length)}${r._anchorName?'<br>Anchor: '+escapeHTML(r._anchorName):''}<br><small>Used by Trace Fiber & OTDR topology</small>`
             : `<b>${escapeHTML(r.type)} Cable</b><br>${escapeHTML(r.name)}<br>Approx. ${fmtM(r.length)}<br><small>Trace mode: click fiber to highlight green</small>`).addTo(fiberFullLayers);
         const hit=L.polyline(r.coords,{color:'#000',weight:24,opacity:0.001,lineCap:'round',lineJoin:'round'}).addTo(fiberFullLayers);
         const traceClick=e=>{if(fiberMode!=='trace')return;L.DomEvent.stopPropagation(e);fiberFullMap.closePopup();traceFiberRoute(r,e.latlng);};
