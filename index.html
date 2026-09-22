@@ -214,7 +214,7 @@
       const jobs=FIBER_FILES.map(async cfg=>{
         try{
           const net=await loadFiberKMZ(cfg);
-          net.points.forEach(p=>{
+          workingNet.points.forEach(p=>{
             if(fiberPointKind(p.name)!=='DP' || !isFinite(p.lat) || !isFinite(p.lng))return;
             const nama=extractDPName(p.name,cfg);
             if(!nama)return;
@@ -345,6 +345,106 @@
     }
     function nearestRouteProjection(p,routeFilter=null){
       let best=null;(currentFiberNet?.routes||[]).forEach((r,ri)=>{if(routeFilter&&r!==routeFilter)return;for(let i=1;i<r.coords.length;i++){const z=projectToSegment(p,r.coords[i-1],r.coords[i]);if(!best||z.d<best.d)best={...z,route:r,ri,seg:i-1,a:r.coords[i-1],b:r.coords[i]};}});return best;
+    }
+    function buildAutoRepairedFiberNetwork(net,maxGap=22){
+      if(!net?.routes?.length)return net;
+      const routes=net.routes.map((r,ri)=>({...r,_baseRouteIndex:ri,coords:(r.coords||[]).map(p=>[p[0],p[1]])}));
+      const eligible=routes.map((r,ri)=>({r,ri})).filter(x=>x.r.type==='DS'||x.r.type==='UNKNOWN');
+      const supportPoints=(net.points||[]).filter(p=>{
+        const k=fiberPointKind(p.name);
+        return (k==='DP'||k==='DB'||k==='JT'||k==='FDC')&&isFinite(p.lat)&&isFinite(p.lng);
+      });
+      const repairs=[],insertions=new Map();
+
+      const supportDistance=(a,b)=>{
+        let best=Infinity;
+        supportPoints.forEach(p=>{
+          const pp=[p.lat,p.lng];
+          best=Math.min(best,haversine(pp,a),haversine(pp,b));
+        });
+        return best;
+      };
+      const bestOnOtherRoutes=(ep,sourceRi)=>{
+        const list=[];
+        eligible.forEach(({r,ri})=>{
+          if(ri===sourceRi||!r.coords||r.coords.length<2)return;
+          const z=bestProjectionOnRoute(ep,r,ri);
+          if(!z||z.d<=3.5||z.d>maxGap)return;
+          const support=supportDistance(ep,z.point);
+          if(support>35&&z.endGap>maxGap)return;
+          list.push({...z,support});
+        });
+        return list.sort((a,b)=>a.d-b.d);
+      };
+
+      eligible.forEach(({r,ri})=>{
+        if(!r.coords||r.coords.length<2)return;
+        [0,r.coords.length-1].forEach(endpointIndex=>{
+          const ep=r.coords[endpointIndex];
+
+          let alreadyConnected=false;
+          eligible.forEach(({r:other,ri:oi})=>{
+            if(oi===ri||alreadyConnected)return;
+            const z=bestProjectionOnRoute(ep,other,oi);
+            if(z&&z.d<=3.5)alreadyConnected=true;
+          });
+          if(alreadyConnected)return;
+
+          const candidates=bestOnOtherRoutes(ep,ri);
+          if(!candidates.length)return;
+          const best=candidates[0],second=candidates[1];
+          if(second && second.d<best.d+7 && second.d<best.d*1.65)return;
+
+          const duplicate=repairs.some(x=>
+            (haversine(x.from,ep)<2&&haversine(x.to,best.point)<2)||
+            (haversine(x.from,best.point)<2&&haversine(x.to,ep)<2)
+          );
+          if(duplicate)return;
+
+          const repair={
+            name:'AUTO CONNECTION',
+            type:r.type==='UNKNOWN'?'UNKNOWN':'DS',
+            coords:[[ep[0],ep[1]],[best.point[0],best.point[1]]],
+            length:haversine(ep,best.point),
+            _autoRepair:true,
+            _sourceRouteIndex:ri,
+            _targetRouteIndex:best.ri,
+            _targetSeg:best.seg,
+            _targetT:best.t,
+            from:[ep[0],ep[1]],
+            to:[best.point[0],best.point[1]]
+          };
+          repairs.push(repair);
+          const key=best.ri+':'+best.seg;
+          if(!insertions.has(key))insertions.set(key,[]);
+          insertions.get(key).push({t:best.t,point:[best.point[0],best.point[1]]});
+        });
+      });
+
+      const grouped=new Map();
+      insertions.forEach((items,key)=>{
+        const parts=key.split(':'),ri=+parts[0],seg=+parts[1];
+        if(!grouped.has(ri))grouped.set(ri,new Map());
+        grouped.get(ri).set(seg,items);
+      });
+      grouped.forEach((segMap,ri)=>{
+        const old=routes[ri].coords,newCoords=[];
+        for(let i=0;i<old.length-1;i++){
+          newCoords.push(old[i]);
+          const items=segMap.get(i);
+          if(items){
+            items.sort((a,b)=>a.t-b.t).forEach(x=>{
+              if(haversine(newCoords[newCoords.length-1],x.point)>0.3)newCoords.push(x.point);
+            });
+          }
+        }
+        newCoords.push(old[old.length-1]);
+        routes[ri].coords=newCoords;
+        routes[ri].length=routeLength(newCoords);
+      });
+
+      repairs.forEach((r,i)=>{r.name='AUTO CONNECTION '+(i+1);});
+      return {...net,routes:[...routes,...repairs],autoRepairs:repairs};
     }
     function nearestNode(g,p,max=40){let bi=-1,bd=Infinity;g.nodes.forEach((n,i)=>{const d=haversine(n,p);if(d<bd){bd=d;bi=i}});return bd<=max?{i:bi,d:bd}:null;}
     function shortestPath(g,start,end){const n=g.nodes.length,dist=Array(n).fill(Infinity),prev=Array(n).fill(null),used=Array(n).fill(false);dist[start]=0;for(let k=0;k<n;k++){let u=-1,b=Infinity;for(let i=0;i<n;i++)if(!used[i]&&dist[i]<b){b=dist[i];u=i}if(u<0||u===end)break;used[u]=true;for(const e of g.adj[u])if(dist[u]+e.w<dist[e.to]){dist[e.to]=dist[u]+e.w;prev[e.to]={u,ri:e.ri}}}if(!isFinite(dist[end]))return null;const edges=[];let v=end;while(v!==start&&prev[v]){edges.push({a:prev[v].u,b:v,ri:prev[v].ri});v=prev[v].u}return{distance:dist[end],edges:edges.reverse()};}
@@ -583,6 +683,23 @@
           connectHubToProjection(hub,jp,z);
         });
         if(seenRoutes.size>1)linkedJointCount++;
+      });
+
+      // Auto-repaired geometry is an explicit approved connection, so its two
+      // endpoints are legal transfer points even when no JT marker exists there.
+      const repairRoutes=routes.filter(r=>r._autoRepair);
+      repairRoutes.forEach(repair=>{
+        [repair.coords[0],repair.coords[repair.coords.length-1]].forEach(rp=>{
+          const matches=routes.map((r,ri)=>bestProjectionOnRoute(rp,r,ri))
+            .filter(z=>z&&z.d<=1.2);
+          if(matches.length<2)return;
+          const hub=addHub(rp),seenRoutes=new Set();
+          matches.forEach(z=>{
+            if(seenRoutes.has(z.ri))return;
+            seenRoutes.add(z.ri);
+            connectHubToProjection(hub,rp,z);
+          });
+        });
       });
 
       const srcPoint=[src.lat,src.lng];
@@ -850,14 +967,17 @@
       }
       fiberFullLayers.clearLayers();
       fiberToolLayers?.clearLayers();measureMarkerLayer?.clearLayers();measureLineLayer?.clearLayers();faultLayer?.clearLayers();toggleFaultPanel(false);hideToolPanel();measurePoints=[];measureTotal=0;fiberMode='trace';
-      currentFiberNet=net;currentFiberGraph=buildGraph(net.routes);
+      const workingNet=buildAutoRepairedFiberNetwork(net);
+      currentFiberNet=workingNet;currentFiberGraph=buildGraph(workingNet.routes);
       populateFaultDPSelect(fdp?.nama||'');
       document.getElementById('traceBtn')?.classList.add('active');document.getElementById('measureBtn')?.classList.remove('active');
       const pts=[];
-      net.routes.forEach(r=>{
+      workingNet.routes.forEach(r=>{
         const color=r.type==='ES'?'#ef4444':r.type==='DS'?'#0878ff':'#64748b';
         const line=L.polyline(r.coords,{color,weight:5,opacity:.92,lineCap:'round',lineJoin:'round'})
-          .bindPopup(`<b>${escapeHTML(r.type)} Cable</b><br>${escapeHTML(r.name)}<br>Approx. ${fmtM(r.length)}<br><small>Trace mode: click fiber to highlight green</small>`).addTo(fiberFullLayers);
+          .bindPopup(r._autoRepair
+            ? `<b>Auto Repaired Connection</b><br>Gap connected: ${fmtM(r.length)}<br><small>Used by Trace Fiber & OTDR topology</small>`
+            : `<b>${escapeHTML(r.type)} Cable</b><br>${escapeHTML(r.name)}<br>Approx. ${fmtM(r.length)}<br><small>Trace mode: click fiber to highlight green</small>`).addTo(fiberFullLayers);
         const hit=L.polyline(r.coords,{color:'#000',weight:24,opacity:0.001,lineCap:'round',lineJoin:'round'}).addTo(fiberFullLayers);
         const traceClick=e=>{if(fiberMode!=='trace')return;L.DomEvent.stopPropagation(e);fiberFullMap.closePopup();traceFiberRoute(r,e.latlng);};
         line.on('click',traceClick);hit.on('click',traceClick);
