@@ -501,6 +501,95 @@
       return net.points.find(p=>candidates.includes(normalizeFiberName(p.name))) ||
              net.points.find(p=>{const k=normalizeFiberName(p.name);return fiberPointKind(p.name)==='FDC'&&candidates.some(c=>k.includes(c)||c.includes(k));}) || null;
     }
+    function addGraphEdge(g,a,b,w,ri=-1,virtual=false){
+      if(a===b||!isFinite(w))return;
+      const exists=g.adj[a].some(e=>e.to===b&&Math.abs(e.w-w)<0.05);
+      if(!exists){
+        g.adj[a].push({to:b,w,ri,virtual});
+        g.adj[b].push({to:a,w,ri,virtual});
+      }
+    }
+    function buildFaultGraph(routes,bridgeTolerance=24){
+      // Keep the normal 4 m graph untouched; OTDR gets a smarter graph that can
+      // bridge small KMZ drawing gaps between one route endpoint and another DS segment.
+      const nodes=[],adj=[],routeNodes=[];
+      const getNode=p=>{
+        let best=-1,bd=4;
+        for(let i=0;i<nodes.length;i++){
+          const d=haversine(nodes[i],p);
+          if(d<bd){bd=d;best=i;}
+        }
+        if(best<0){best=nodes.length;nodes.push([p[0],p[1]]);adj.push([]);}
+        return best;
+      };
+
+      routes.forEach((r,ri)=>{
+        const ids=[];
+        r.coords.forEach(p=>ids.push(getNode(p)));
+        routeNodes[ri]=ids;
+        for(let i=1;i<ids.length;i++){
+          const a=ids[i-1],b=ids[i],w=haversine(r.coords[i-1],r.coords[i]);
+          addGraphEdge({nodes,adj},a,b,w,ri,false);
+        }
+      });
+
+      const g={nodes,adj};
+      const originalNodeCount=nodes.length;
+
+      // Only route ENDPOINTS are allowed to bridge. This avoids accidentally
+      // joining nearby parallel FD cables in the middle of their routes.
+      routes.forEach((r,ri)=>{
+        if(!r.coords?.length)return;
+        const endpointIndexes=[0,r.coords.length-1];
+        endpointIndexes.forEach(epIdx=>{
+          const ep=r.coords[epIdx];
+          const epNode=routeNodes[ri][epIdx];
+          let best=null;
+
+          routes.forEach((other,ori)=>{
+            if(ori===ri||!other.coords||other.coords.length<2)return;
+            for(let si=1;si<other.coords.length;si++){
+              const z=projectToSegment(ep,other.coords[si-1],other.coords[si]);
+              if(z.d<=4||z.d>bridgeTolerance)continue;
+              if(!best||z.d<best.d)best={...z,ori,si};
+            }
+          });
+
+          if(!best)return;
+
+          const aNode=routeNodes[best.ori][best.si-1];
+          const bNode=routeNodes[best.ori][best.si];
+          const qNode=nodes.length;
+          nodes.push(best.point);adj.push([]);
+
+          const gap=haversine(ep,best.point);
+          const qa=haversine(best.point,nodes[aNode]);
+          const qb=haversine(best.point,nodes[bNode]);
+
+          addGraphEdge(g,epNode,qNode,gap,-1,true);
+          addGraphEdge(g,qNode,aNode,qa,best.ori,true);
+          addGraphEdge(g,qNode,bNode,qb,best.ori,true);
+        });
+      });
+
+      g.smartBridge=true;
+      g.originalNodeCount=originalNodeCount;
+      return g;
+    }
+    function findFaultPath(ds,dpPoint,srcPoint){
+      const attempts=[18,24,32];
+      let last=null;
+      for(const bridgeTolerance of attempts){
+        const g=buildFaultGraph(ds,bridgeTolerance);
+        const dn=nearestNode(g,dpPoint,70),sn=nearestNode(g,srcPoint,70);
+        if(!dn||!sn){last={g,dn,sn,path:null,bridgeTolerance};continue;}
+        const path=shortestPath(g,dn.i,sn.i);
+        if(path)return {g,dn,sn,path,bridgeTolerance};
+        last={g,dn,sn,path:null,bridgeTolerance};
+      }
+      return last;
+    }
+
     function buildOrderedDPtoFDCPath(net,cfg,fdp){
       const dp=findFiberPointByName(net,fdp?.nama||'');
       const src=findSourcePoint(net,cfg);
@@ -508,10 +597,11 @@
       if(!src)throw new Error('FDC/source point not found in fiber route');
       const ds=net.routes.filter(r=>r.type==='DS');
       if(!ds.length)throw new Error('No DS cable route found');
-      const g=buildGraph(ds),dn=nearestNode(g,[dp.lat,dp.lng],60),sn=nearestNode(g,[src.lat,src.lng],60);
+
+      const resolved=findFaultPath(ds,[dp.lat,dp.lng],[src.lat,src.lng]);
+      const g=resolved?.g,dn=resolved?.dn,sn=resolved?.sn,path=resolved?.path;
       if(!dn||!sn)throw new Error('DP/FDC is not connected to DS topology');
-      const path=shortestPath(g,dn.i,sn.i);
-      if(!path)throw new Error('No DS path from DP to FDC');
+      if(!path)throw new Error('No DS path from '+(dp.name||fdp?.nama||'selected DP')+' to FDC. Check DS route continuity in KMZ.');
 
       // Start from the exact selected DP coordinate, then follow the DS graph to the one registered FDC.
       const coords=[[dp.lat,dp.lng]];
@@ -527,7 +617,7 @@
 
       const total=routeLength(coords);
       if(coords.length<2||total<=0)throw new Error('DS path is too short to calculate OTDR distance');
-      return {coords,distance:total,dp,src};
+      return {coords,distance:total,dp,src,bridgeTolerance:resolved?.bridgeTolerance||0};
     }
 
     function pointAtRouteDistance(coords,targetM){
@@ -660,7 +750,7 @@
         if(faultAnimFrame)cancelAnimationFrame(faultAnimFrame);faultAnimFrame=null;faultLayer?.clearLayers();
         const route=buildOrderedDPtoFDCPath(currentFiberNet,currentFiberCfg,currentFiberFDP);
         const info=document.getElementById('faultRouteInfo');
-        if(info)info.innerHTML='<b>Route:</b> '+escapeHTML(route.dp.name)+' → '+escapeHTML(route.src.name)+'<br><b>Mapped DS length:</b> '+fmtM(route.distance);
+        if(info)info.innerHTML='<b>Route:</b> '+escapeHTML(route.dp.name)+' → '+escapeHTML(route.src.name)+'<br><b>Mapped DS length:</b> '+fmtM(route.distance)+(route.bridgeTolerance?'<br><span style="color:#8290ae">Topology auto-link: active</span>':'');
         if(dist>route.distance)throw new Error('OTDR distance exceeds mapped DP → FDC route ('+fmtM(route.distance)+')');
         const slice=routeSliceToDistance(route.coords,dist),target=pointAtRouteDistance(route.coords,dist).point;
         L.polyline(slice,{color:'#ef4444',weight:7,opacity:.95,lineCap:'round',lineJoin:'round',className:'otdr-trace'}).addTo(faultLayer);
