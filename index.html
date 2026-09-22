@@ -18,6 +18,7 @@
 .otdr-fault-panel{position:absolute;z-index:10003;top:130px;right:14px;width:330px;background:#fff;border:1px solid #dbe7f8;border-radius:16px;box-shadow:0 12px 34px #00152f35;padding:14px;display:none}
 .otdr-fault-panel.show{display:block}.otdr-fault-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}.otdr-fault-head b{font-size:15px;color:#9b1c1c}.otdr-fault-head button{border:0;background:#f3f6fb;border-radius:8px;width:30px;height:30px;cursor:pointer}
 .otdr-selected{background:#f6f9ff;border:1px solid #dfe8f6;border-radius:10px;padding:9px 10px;font-size:11px;margin-bottom:10px;color:#526786}.otdr-selected strong{display:block;color:#0b2252;font-size:13px;margin-top:2px;overflow-wrap:anywhere}
+.otdr-dp-select{width:100%;border:1px solid #cbd8eb;border-radius:10px;padding:10px 11px;margin:0 0 8px;background:#fff;color:#0b2252;font-size:13px;font-weight:800;outline:none;cursor:pointer}.otdr-dp-select:focus{border-color:#0b67d1;box-shadow:0 0 0 3px #dbeafe}
 .otdr-form-label{display:block;font-size:11px;font-weight:900;color:#526786;margin-bottom:5px}.otdr-input-row{display:grid;grid-template-columns:1fr 80px;gap:8px}.otdr-input-row input{width:100%;border:1px solid #cbd8eb;border-radius:10px;padding:11px 12px;font-size:15px;font-weight:800;outline:none}.otdr-input-row input:focus{border-color:#ef4444;box-shadow:0 0 0 3px #fee2e2}.otdr-input-row div{display:grid;place-items:center;background:#f4f7fb;border:1px solid #dbe4f1;border-radius:10px;font-size:12px;font-weight:900}
 .otdr-go{width:100%;margin-top:10px;border:0;border-radius:11px;padding:12px 13px;background:linear-gradient(135deg,#dc2626,#991b1b);color:#fff;font-weight:900;cursor:pointer}.otdr-go:disabled{opacity:.55;cursor:not-allowed}.otdr-info{font-size:10px;line-height:1.45;color:#7a879d;margin-top:8px}.otdr-secondary{width:100%;margin-top:9px;border:1px solid #d8e4f4;border-radius:9px;padding:9px;background:#f5f8ff;color:#174b8f;font-weight:800;cursor:pointer}
 .otdr-moving{width:30px;height:30px;border-radius:50%;background:#ff2d2d;border:3px solid #fff;box-shadow:0 0 0 6px #ff2d2d33,0 3px 12px #0005;display:grid;place-items:center;font-size:15px}.otdr-pin{width:32px;height:32px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#dc2626;border:3px solid #fff;box-shadow:0 3px 10px #0005;display:grid;place-items:center}.otdr-pin span{transform:rotate(45deg);font-size:14px}.otdr-popup{min-width:235px}.otdr-popup .gps{font-family:Consolas,monospace;font-weight:900;color:#0b55b7}.otdr-trace{stroke-dasharray:10 8;animation:otdrDash 1s linear infinite}@keyframes otdrDash{to{stroke-dashoffset:-18}}
@@ -43,7 +44,11 @@
   <div id="fiberToolPanel" class="fiber-panel"></div>
   <div id="faultPanel" class="otdr-fault-panel">
     <div class="otdr-fault-head"><b>⚡ Automation Fault Locator</b><button onclick="toggleFaultPanel(false)">✕</button></div>
-    <div class="otdr-selected">Start DP/FDP<br><strong id="faultDPName">No DP selected</strong></div>
+    <label class="otdr-form-label" for="faultDPSelect">Select Start FDP/DP</label>
+    <select id="faultDPSelect" class="otdr-dp-select" onchange="onFaultDPChange()">
+      <option value="">No DP/FDP available</option>
+    </select>
+    <div class="otdr-selected">Selected Start Point<br><strong id="faultDPName">No DP selected</strong></div>
     <label class="otdr-form-label" for="faultDistance">OTDR fault distance from DP</label>
     <div class="otdr-input-row"><input id="faultDistance" type="number" min="1" step="1" placeholder="Example: 200"><div>meter</div></div>
     <button id="faultLocateBtn" class="otdr-go" onclick="locateOTDRFault()">▶ LOCATE SUSPECTED CUT</button>
@@ -62,6 +67,7 @@
     let fiberFullMap=null, fiberFullLayers=null, fiberFullBounds=null;
     let fiberToolLayers=null, measureMarkerLayer=null, measureLineLayer=null, currentFiberNet=null, currentFiberGraph=null, fiberMode='trace', measurePoints=[], measureTotal=0;
     let currentFiberFDP=null, currentFiberCfg=null, faultLayer=null, faultAnimMarker=null, faultFinalMarker=null, faultAnimFrame=null;
+    let faultSelectablePoints=[];
     const fiberNetworkCache = new Map();
     const FIBER_FILES = [
       {prefix:'KGU_C001',  file:'KGU_C001 ES_DS ROUTE.kmz',  source:'KGU C001'},
@@ -547,6 +553,69 @@
       }
       return out;
     }
+    function canonicalFaultPointName(point,cfg){
+      const raw=String(point?.name||'').trim();
+      const normalized=normalizeFdpKey(raw);
+      const code=(normalized.match(/(?:DP|DB)\d+[A-Z]?/i)||[])[0];
+      if(!code)return null;
+      if(normalized.includes(cfg.prefix))return normalized;
+      return cfg.prefix+'_'+code.toUpperCase();
+    }
+    function getFaultSelectablePoints(net,cfg){
+      const seen=new Set(),out=[];
+      (net?.points||[]).forEach(p=>{
+        const kind=fiberPointKind(p.name);
+        if(kind!=='DP'&&kind!=='DB')return;
+        if(!isFinite(p.lat)||!isFinite(p.lng))return;
+        const nama=canonicalFaultPointName(p,cfg);
+        if(!nama)return;
+        const key=normalizeFdpKey(nama);
+        if(seen.has(key))return;
+        seen.add(key);
+        out.push({nama,lat:p.lat,lng:p.lng,jalan:'KMZ Fiber Route',section:cfg.source,_fromKMZ:true,_fiberPoint:p});
+      });
+      return out.sort((a,b)=>a.nama.localeCompare(b.nama,undefined,{numeric:true,sensitivity:'base'}));
+    }
+    function populateFaultDPSelect(preferredName=''){
+      const sel=document.getElementById('faultDPSelect');if(!sel)return;
+      faultSelectablePoints=getFaultSelectablePoints(currentFiberNet,currentFiberCfg||{prefix:'',source:''});
+      sel.innerHTML='';
+      if(!faultSelectablePoints.length){
+        const opt=document.createElement('option');opt.value='';opt.textContent='No DP/FDP available';sel.appendChild(opt);
+        currentFiberFDP=null;
+        const n=document.getElementById('faultDPName');if(n)n.textContent='No DP selected';
+        return;
+      }
+      faultSelectablePoints.forEach(item=>{
+        const opt=document.createElement('option');
+        opt.value=item.nama;opt.textContent=item.nama;sel.appendChild(opt);
+      });
+      const wanted=normalizeFdpKey(preferredName||currentFiberFDP?.nama||'');
+      let selected=faultSelectablePoints.find(x=>normalizeFdpKey(x.nama)===wanted);
+      if(!selected&&wanted){
+        const code=(wanted.match(/(?:DP|DB)\d+[A-Z]?/i)||[])[0];
+        if(code)selected=faultSelectablePoints.find(x=>normalizeFdpKey(x.nama).endsWith('_'+code.toUpperCase()));
+      }
+      selected=selected||faultSelectablePoints[0];
+      sel.value=selected.nama;
+      currentFiberFDP=selected;
+      const n=document.getElementById('faultDPName');if(n)n.textContent=selected.nama;
+    }
+    function onFaultDPChange(){
+      const sel=document.getElementById('faultDPSelect');if(!sel)return;
+      const picked=faultSelectablePoints.find(x=>x.nama===sel.value);
+      if(!picked)return;
+      if(faultAnimFrame)cancelAnimationFrame(faultAnimFrame);faultAnimFrame=null;
+      faultLayer?.clearLayers();faultAnimMarker=null;faultFinalMarker=null;
+      currentFiberFDP=picked;
+      const n=document.getElementById('faultDPName');if(n)n.textContent=picked.nama;
+      const info=document.getElementById('faultRouteInfo');
+      if(info)info.textContent='Distance follows the registered DS fiber route toward the FDC, not a straight-line radius.';
+      const input=document.getElementById('faultDistance');if(input)input.value='';
+      if(fiberFullMap&&isFinite(picked.lat)&&isFinite(picked.lng))fiberFullMap.setView([picked.lat,picked.lng],Math.max(fiberFullMap.getZoom(),17));
+      showToast('OTDR start point: '+picked.nama);
+    }
+
     function toggleFaultPanel(force){
       const p=document.getElementById('faultPanel');if(!p)return;
       const show=typeof force==='boolean'?force:!p.classList.contains('show');
@@ -555,6 +624,7 @@
       if(show){
         fiberMode='fault';hideToolPanel();fiberToolLayers?.clearLayers();measureMarkerLayer?.clearLayers();measureLineLayer?.clearLayers();
         document.getElementById('traceBtn')?.classList.remove('active');document.getElementById('measureBtn')?.classList.remove('active');
+        populateFaultDPSelect(currentFiberFDP?.nama||'');
         const n=document.getElementById('faultDPName');if(n)n.textContent=currentFiberFDP?.nama||'No DP selected';
         const info=document.getElementById('faultRouteInfo');if(info)info.textContent='Distance follows the registered DS fiber route toward the FDC, not a straight-line radius.';
         setTimeout(()=>document.getElementById('faultDistance')?.focus(),60);
@@ -661,6 +731,7 @@
       fiberFullLayers.clearLayers();
       fiberToolLayers?.clearLayers();measureMarkerLayer?.clearLayers();measureLineLayer?.clearLayers();faultLayer?.clearLayers();toggleFaultPanel(false);hideToolPanel();measurePoints=[];measureTotal=0;fiberMode='trace';
       currentFiberNet=net;currentFiberGraph=buildGraph(net.routes);
+      populateFaultDPSelect(fdp?.nama||'');
       document.getElementById('traceBtn')?.classList.add('active');document.getElementById('measureBtn')?.classList.remove('active');
       const pts=[];
       net.routes.forEach(r=>{
@@ -689,7 +760,7 @@
     }
     function fitFiberFullscreen(){if(fiberFullMap&&fiberFullBounds&&fiberFullBounds.isValid())fiberFullMap.fitBounds(fiberFullBounds.pad(.08));}
     function closeFiberFullscreen(){
-      clearFiberTools();currentFiberNet=null;currentFiberGraph=null;currentFiberFDP=null;currentFiberCfg=null;
+      clearFiberTools();currentFiberNet=null;currentFiberGraph=null;currentFiberFDP=null;currentFiberCfg=null;faultSelectablePoints=[];
       const overlay=document.getElementById('fiberFullscreen');overlay.classList.remove('show');overlay.setAttribute('aria-hidden','true');document.body.style.overflow='';
     }
 
