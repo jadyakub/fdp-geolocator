@@ -14,6 +14,15 @@
 .dp-map-label:before{border-top-color:#0b67d1!important}
 @media(max-width:560px){.dp-map-label{font-size:10px!important;padding:2px 5px!important}}
 </style>
+<style id="otdr-fault-style">
+.otdr-fault-panel{position:absolute;z-index:10003;top:130px;right:14px;width:330px;background:#fff;border:1px solid #dbe7f8;border-radius:16px;box-shadow:0 12px 34px #00152f35;padding:14px;display:none}
+.otdr-fault-panel.show{display:block}.otdr-fault-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}.otdr-fault-head b{font-size:15px;color:#9b1c1c}.otdr-fault-head button{border:0;background:#f3f6fb;border-radius:8px;width:30px;height:30px;cursor:pointer}
+.otdr-selected{background:#f6f9ff;border:1px solid #dfe8f6;border-radius:10px;padding:9px 10px;font-size:11px;margin-bottom:10px;color:#526786}.otdr-selected strong{display:block;color:#0b2252;font-size:13px;margin-top:2px;overflow-wrap:anywhere}
+.otdr-form-label{display:block;font-size:11px;font-weight:900;color:#526786;margin-bottom:5px}.otdr-input-row{display:grid;grid-template-columns:1fr 80px;gap:8px}.otdr-input-row input{width:100%;border:1px solid #cbd8eb;border-radius:10px;padding:11px 12px;font-size:15px;font-weight:800;outline:none}.otdr-input-row input:focus{border-color:#ef4444;box-shadow:0 0 0 3px #fee2e2}.otdr-input-row div{display:grid;place-items:center;background:#f4f7fb;border:1px solid #dbe4f1;border-radius:10px;font-size:12px;font-weight:900}
+.otdr-go{width:100%;margin-top:10px;border:0;border-radius:11px;padding:12px 13px;background:linear-gradient(135deg,#dc2626,#991b1b);color:#fff;font-weight:900;cursor:pointer}.otdr-go:disabled{opacity:.55;cursor:not-allowed}.otdr-info{font-size:10px;line-height:1.45;color:#7a879d;margin-top:8px}.otdr-secondary{width:100%;margin-top:9px;border:1px solid #d8e4f4;border-radius:9px;padding:9px;background:#f5f8ff;color:#174b8f;font-weight:800;cursor:pointer}
+.otdr-moving{width:30px;height:30px;border-radius:50%;background:#ff2d2d;border:3px solid #fff;box-shadow:0 0 0 6px #ff2d2d33,0 3px 12px #0005;display:grid;place-items:center;font-size:15px}.otdr-pin{width:32px;height:32px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#dc2626;border:3px solid #fff;box-shadow:0 3px 10px #0005;display:grid;place-items:center}.otdr-pin span{transform:rotate(45deg);font-size:14px}.otdr-popup{min-width:235px}.otdr-popup .gps{font-family:Consolas,monospace;font-weight:900;color:#0b55b7}.otdr-trace{stroke-dasharray:10 8;animation:otdrDash 1s linear infinite}@keyframes otdrDash{to{stroke-dashoffset:-18}}
+@media(max-width:640px){.otdr-fault-panel{top:auto;left:10px;right:10px;bottom:14px;width:auto;max-height:52vh;overflow:auto}}
+</style>
 </head><body><div class="top"><div class="header"><div class="brand"><div class="logo">📍</div><div><h1>FDP <span>GeoLocator</span></h1><div class="tag">Find · Explore · Connect FDP Locations</div></div></div><div class="date" id="dateBox">📅 Today</div></div></div>
 <main class="shell"><section class="stats"><div class="stat"><div class="stat-ico">🗂️</div><div><div class="stat-label">Total FDP</div><div class="stat-num" id="totalFDP">0</div><div class="stat-sub">Total registered FDP locations</div></div></div><div class="stat"><div class="stat-ico">🔎</div><div><div class="stat-label">Search Results</div><div class="stat-num" id="searchResults">0</div><div class="stat-sub">FDP matched your search</div></div></div><div class="stat"><div class="stat-ico">📍</div><div><div class="stat-label">Areas Covered</div><div class="stat-num" id="areaCount">0</div><div class="stat-sub">Sections / Areas</div></div></div></section>
 <section class="workspace"><div class="left"><div class="search-title">🔎 Search FDP Location</div><div class="search-sub">Search by FDP Name, Street or Section</div><div class="searchbar"><input id="searchInput" class="search-input" placeholder="Try: FDP name, street or section..."><button class="search-btn" onclick="handleSearch()">⌕ Search</button></div><div class="filter-row"><div class="filter-chip">All FDP Locations</div><button id="reloadBtn" class="reload-btn">↻ Reload Data</button></div><div class="results-head"><span>☷ Search Results <span class="badge">(<span id="resultBadge">0</span>)</span></span><span style="font-size:12px;color:#8290ae">FDP List</span></div><div id="resultsSection" class="results-section"></div></div><div class="map-pane"><div class="map-badge">● <span id="mapCount">0 FDP locations shown</span></div><button id="fitBtn" class="map-ctl">⛶ Fit All Markers</button><div id="fiberCard" class="fiber-card"></div><div class="map-container"><div id="map"></div></div></div></section>
@@ -28,10 +37,19 @@
   <div class="fiber-tools">
     <button id="traceBtn" class="fiber-tool-btn" onclick="setFiberMode('trace')">🔗 Trace Fiber</button>
     <button id="measureBtn" class="fiber-tool-btn" onclick="setFiberMode('measure')">📏 Measure</button>
-    <button class="fiber-tool-btn" onclick="openFaultPanel()">⚠ Fault Location</button>
+    <button id="faultBtn" class="fiber-tool-btn" onclick="toggleFaultPanel()">⚡ OTDR Fault</button>
     <button class="fiber-tool-btn" onclick="clearFiberTools()">🧹 Clear</button>
   </div>
   <div id="fiberToolPanel" class="fiber-panel"></div>
+  <div id="faultPanel" class="otdr-fault-panel">
+    <div class="otdr-fault-head"><b>⚡ Automation Fault Locator</b><button onclick="toggleFaultPanel(false)">✕</button></div>
+    <div class="otdr-selected">Start DP/FDP<br><strong id="faultDPName">No DP selected</strong></div>
+    <label class="otdr-form-label" for="faultDistance">OTDR fault distance from DP</label>
+    <div class="otdr-input-row"><input id="faultDistance" type="number" min="1" step="1" placeholder="Example: 200"><div>meter</div></div>
+    <button id="faultLocateBtn" class="otdr-go" onclick="locateOTDRFault()">▶ LOCATE SUSPECTED CUT</button>
+    <div id="faultRouteInfo" class="otdr-info">Distance follows the registered DS fiber route toward the FDC, not a straight-line radius.</div>
+    <button class="otdr-secondary" onclick="openGPSFaultPanel()">📍 Existing GPS Fault Analyzer</button>
+  </div>
   <button class="fiber-fit" onclick="fitFiberFullscreen()">⛶ Fit All Fiber</button>
 </div>
 <div id="toast" class="toast">Done</div>
@@ -43,10 +61,12 @@
     let fiberLayer, fiberHighlightLayer, fiberPointLayer, fiberNetwork=null;
     let fiberFullMap=null, fiberFullLayers=null, fiberFullBounds=null;
     let fiberToolLayers=null, measureMarkerLayer=null, measureLineLayer=null, currentFiberNet=null, currentFiberGraph=null, fiberMode='trace', measurePoints=[], measureTotal=0;
+    let currentFiberFDP=null, currentFiberCfg=null, faultLayer=null, faultAnimMarker=null, faultFinalMarker=null, faultAnimFrame=null;
     const fiberNetworkCache = new Map();
     const FIBER_FILES = [
       {prefix:'KGU_C001',  file:'KGU_C001 ES_DS ROUTE.kmz',  source:'KGU C001'},
       {prefix:'KGU_C002',  file:'KGU_C002 ES_DS ROUTE.kmz',  source:'KGU C002'},
+      {prefix:'KGU_C016',  file:'KGU_C016 ES_DS ROUTE.kmz',  source:'KGU C016'},
       {prefix:'NBN_C001',  file:'NBN_C001_ES_DS_ROUTE.kmz',  source:'NBN C001'},
       {prefix:'NBN_C002',  file:'NBN_C002_ES_DS_ROUTE.kmz',  source:'NBN C002'},
       {prefix:'NBN_C003',  file:'NBN_C003_ES_DS_ROUTE.kmz',  source:'NBN C003'},
@@ -339,6 +359,7 @@
       return L.divIcon({className:'',html:`<div style="width:26px;height:26px;border-radius:50%;background:${cfg[0]};border:3px solid white;box-shadow:0 2px 8px #0005;color:white;font:900 11px/20px Arial;text-align:center">${cfg[1]}</div>`,iconSize:[26,26],iconAnchor:[13,13]});
     }
     function setFiberMode(mode){
+      toggleFaultPanel(false);
       fiberMode=mode;
       document.getElementById('traceBtn')?.classList.toggle('active',mode==='trace');
       document.getElementById('measureBtn')?.classList.toggle('active',mode==='measure');
@@ -349,6 +370,7 @@
     function hideToolPanel(){document.getElementById('fiberToolPanel')?.classList.remove('show');}
     function clearFiberTools(hide=true){
       fiberToolLayers?.clearLayers();measureMarkerLayer?.clearLayers();measureLineLayer?.clearLayers();measurePoints=[];measureTotal=0;
+      clearFaultLocator(hide);
       if(hide)hideToolPanel();
     }
     function nearestGraphNodeAny(g,p){let bi=-1,bd=Infinity;g.nodes.forEach((n,i)=>{const d=haversine(n,p);if(d<bd){bd=d;bi=i}});return {i:bi,d:bd};}
@@ -450,7 +472,125 @@
     function redrawMeasure(){renderMeasurement();}
     function undoMeasurePoint(){if(measurePoints.length){measurePoints.pop();renderMeasurement();}}
     function clearMeasure(){measurePoints=[];measureTotal=0;measureMarkerLayer?.clearLayers();measureLineLayer?.clearLayers();const i=document.getElementById('measureInfo');if(i)i.innerHTML='Click anywhere to add P1, P2, P3... Drag numbered points freely to adjust.';}
-    function openFaultPanel(){
+    function normalizeFiberName(s=''){return String(s).toUpperCase().replace(/[\s-]+/g,'_').replace(/_+/g,'_').trim();}
+    function findFiberPointByName(net,name){
+      const key=normalizeFiberName(name);
+      let p=net.points.find(x=>normalizeFiberName(x.name)===key);
+      if(p)return p;
+      const short=(key.match(/(?:DP|DB)\d+[A-Z]?/i)||[])[0];
+      if(short)p=net.points.find(x=>normalizeFiberName(x.name).includes(short.toUpperCase()));
+      return p||null;
+    }
+    function findSourcePoint(net,cfg){
+      const candidates=[cfg?.source,cfg?.prefix,String(cfg?.source||'').replace(/\s+/g,'_')].filter(Boolean).map(normalizeFiberName);
+      return net.points.find(p=>candidates.includes(normalizeFiberName(p.name))) ||
+             net.points.find(p=>{const k=normalizeFiberName(p.name);return fiberPointKind(p.name)==='FDC'&&candidates.some(c=>k.includes(c)||c.includes(k));}) || null;
+    }
+    function buildOrderedDPtoFDCPath(net,cfg,fdp){
+      const dp=findFiberPointByName(net,fdp?.nama||'');
+      const src=findSourcePoint(net,cfg);
+      if(!dp)throw new Error('DP/FDP point not found in fiber route');
+      if(!src)throw new Error('FDC/source point not found in fiber route');
+      const ds=net.routes.filter(r=>r.type==='DS');
+      if(!ds.length)throw new Error('No DS cable route found');
+      const g=buildGraph(ds),dn=nearestNode(g,[dp.lat,dp.lng],60),sn=nearestNode(g,[src.lat,src.lng],60);
+      if(!dn||!sn)throw new Error('DP/FDC is not connected to DS topology');
+      const path=shortestPath(g,dn.i,sn.i);
+      if(!path)throw new Error('No DS path from DP to FDC');
+      const coords=[];
+      path.edges.forEach((e,i)=>{if(i===0)coords.push(g.nodes[e.a]);coords.push(g.nodes[e.b]);});
+      if(coords.length<2)throw new Error('DS path is too short to calculate OTDR distance');
+      return {coords,distance:path.distance,dp,src};
+    }
+    function pointAtRouteDistance(coords,targetM){
+      if(!coords.length)return null;
+      if(targetM<=0)return {point:coords[0],index:0,ratio:0};
+      let acc=0;
+      for(let i=1;i<coords.length;i++){
+        const seg=haversine(coords[i-1],coords[i]);
+        if(acc+seg>=targetM){
+          const r=seg?Math.max(0,Math.min(1,(targetM-acc)/seg)):0;
+          return {point:[coords[i-1][0]+(coords[i][0]-coords[i-1][0])*r,coords[i-1][1]+(coords[i][1]-coords[i-1][1])*r],index:i,ratio:r};
+        }
+        acc+=seg;
+      }
+      return {point:coords[coords.length-1],index:coords.length-1,ratio:1};
+    }
+    function routeSliceToDistance(coords,targetM){
+      const out=[coords[0]];let acc=0;
+      for(let i=1;i<coords.length;i++){
+        const seg=haversine(coords[i-1],coords[i]);
+        if(acc+seg>=targetM){out.push(pointAtRouteDistance(coords,targetM).point);break;}
+        out.push(coords[i]);acc+=seg;
+      }
+      return out;
+    }
+    function toggleFaultPanel(force){
+      const p=document.getElementById('faultPanel');if(!p)return;
+      const show=typeof force==='boolean'?force:!p.classList.contains('show');
+      p.classList.toggle('show',show);
+      document.getElementById('faultBtn')?.classList.toggle('active',show);
+      if(show){
+        fiberMode='fault';hideToolPanel();fiberToolLayers?.clearLayers();measureMarkerLayer?.clearLayers();measureLineLayer?.clearLayers();
+        document.getElementById('traceBtn')?.classList.remove('active');document.getElementById('measureBtn')?.classList.remove('active');
+        const n=document.getElementById('faultDPName');if(n)n.textContent=currentFiberFDP?.nama||'No DP selected';
+        const info=document.getElementById('faultRouteInfo');if(info)info.textContent='Distance follows the registered DS fiber route toward the FDC, not a straight-line radius.';
+        setTimeout(()=>document.getElementById('faultDistance')?.focus(),60);
+      }
+    }
+    function clearFaultLocator(closePanel=true){
+      if(faultAnimFrame)cancelAnimationFrame(faultAnimFrame);faultAnimFrame=null;
+      if(faultLayer)faultLayer.clearLayers();faultAnimMarker=null;faultFinalMarker=null;
+      if(closePanel)toggleFaultPanel(false);
+    }
+    function movingFaultIcon(){return L.divIcon({className:'',html:'<div class="otdr-moving">⚡</div>',iconSize:[30,30],iconAnchor:[15,15]});}
+    function finalFaultIcon(){return L.divIcon({className:'',html:'<div class="otdr-pin"><span>✂</span></div>',iconSize:[32,32],iconAnchor:[9,30],popupAnchor:[7,-27]});}
+    function animateFaultAlong(coords,totalM,onDone){
+      if(!fiberFullMap||!coords.length)return;
+      const duration=Math.min(6000,Math.max(1600,totalM*7));
+      const started=performance.now();
+      faultAnimMarker=L.marker(coords[0],{icon:movingFaultIcon(),zIndexOffset:2500}).addTo(faultLayer);
+      const tick=now=>{
+        const t=Math.min(1,(now-started)/duration),eased=1-Math.pow(1-t,2.2),d=totalM*eased;
+        const pos=pointAtRouteDistance(coords,d)?.point||coords[0];
+        faultAnimMarker.setLatLng(pos);
+        if(t<1)faultAnimFrame=requestAnimationFrame(tick);
+        else{faultLayer.removeLayer(faultAnimMarker);faultAnimMarker=null;faultAnimFrame=null;onDone(pos);}
+      };
+      faultAnimFrame=requestAnimationFrame(tick);
+    }
+    function locateOTDRFault(){
+      const btn=document.getElementById('faultLocateBtn');
+      try{
+        if(!currentFiberNet||!currentFiberCfg||!currentFiberFDP)throw new Error('Open a DP/FDP Fiber Route first');
+        const dist=parseFloat(document.getElementById('faultDistance')?.value);
+        if(!isFinite(dist)||dist<=0)throw new Error('Enter a valid OTDR distance in meter');
+        if(faultAnimFrame)cancelAnimationFrame(faultAnimFrame);faultAnimFrame=null;faultLayer?.clearLayers();
+        const route=buildOrderedDPtoFDCPath(currentFiberNet,currentFiberCfg,currentFiberFDP);
+        const info=document.getElementById('faultRouteInfo');
+        if(info)info.innerHTML='<b>Route:</b> '+escapeHTML(route.dp.name)+' → '+escapeHTML(route.src.name)+'<br><b>Mapped DS length:</b> '+fmtM(route.distance);
+        if(dist>route.distance)throw new Error('OTDR distance exceeds mapped DP → FDC route ('+fmtM(route.distance)+')');
+        const slice=routeSliceToDistance(route.coords,dist),target=pointAtRouteDistance(route.coords,dist).point;
+        L.polyline(slice,{color:'#ef4444',weight:7,opacity:.95,lineCap:'round',lineJoin:'round',className:'otdr-trace'}).addTo(faultLayer);
+        if(slice.length>1)fiberFullMap.fitBounds(L.latLngBounds(slice).pad(.24),{maxZoom:19});
+        if(btn){btn.disabled=true;btn.textContent='⚡ TRACING '+Math.round(dist)+' m...';}
+        animateFaultAlong(route.coords,dist,()=>{
+          const lat=target[0],lng=target[1],gps=lat.toFixed(6)+', '+lng.toFixed(6);
+          faultFinalMarker=L.marker(target,{icon:finalFaultIcon(),zIndexOffset:2600}).addTo(faultLayer);
+          const html='<div class="otdr-popup"><b style="color:#b91c1c">⚠ SUSPECTED CUT LOCATION</b><br><br><b>Start DP/FDP:</b> '+escapeHTML(currentFiberFDP.nama)+'<br><b>OTDR Distance:</b> '+Math.round(dist)+' m<br><b>Direction:</b> DP → FDC<br><b>GPS:</b><br><span class="gps">'+gps+'</span><br><div style="display:flex;gap:6px;margin-top:9px"><button onclick="fallbackCopyGPS(\''+gps+'\')" style="border:0;border-radius:7px;padding:7px 9px;background:#eef4ff;color:#174b8f;font-weight:800;cursor:pointer">📋 Copy GPS</button><button onclick="window.open(\'https://www.google.com/maps?q='+lat+','+lng+'\',\'_blank\',\'noopener\')" style="border:0;border-radius:7px;padding:7px 9px;background:#0b67d1;color:#fff;font-weight:800;cursor:pointer">🗺 Maps</button></div></div>';
+          faultFinalMarker.bindPopup(html,{maxWidth:310}).openPopup();fiberFullMap.panTo(target);
+          if(btn){btn.disabled=false;btn.textContent='▶ LOCATE SUSPECTED CUT';}
+          showToast('Suspected cut located at '+Math.round(dist)+' m');
+        });
+      }catch(err){
+        console.error(err);if(btn){btn.disabled=false;btn.textContent='▶ LOCATE SUSPECTED CUT';}
+        const info=document.getElementById('faultRouteInfo');if(info)info.textContent=err.message||'Fault locator error';
+        showToast(err.message||'Fault locator error');
+      }
+    }
+
+    function openGPSFaultPanel(){
+      toggleFaultPanel(false);
       fiberMode='fault';document.getElementById('traceBtn')?.classList.remove('active');document.getElementById('measureBtn')?.classList.remove('active');
       showToolPanel('<h3>⚠ Fault Location Analyzer</h3><input id="faultCoord" placeholder="Paste: 5.123456, 116.123456"><button class="action" onclick="analyzeFault()">Analyze Coordinate</button><div id="faultResult" style="margin-top:9px"></div>');
     }
@@ -477,11 +617,12 @@
       try{
         showToast('Loading full fiber route…');
         const net=await loadFiberKMZ(cfg);
-        openFiberFullscreen(net,cfg);
+        openFiberFullscreen(net,cfg,fdp);
       }catch(err){console.error(err);showToast('Fiber route unavailable: '+err.message);}
     }
-    function openFiberFullscreen(net,cfg){
+    function openFiberFullscreen(net,cfg,fdp=null){
       const overlay=document.getElementById('fiberFullscreen');
+      currentFiberFDP=fdp;currentFiberCfg=cfg;
       document.getElementById('fiberFsTitle').textContent=cfg.source+' Fiber Route';
       document.getElementById('fiberFsSub').textContent='Full Network • ES + DS Cable';
       overlay.classList.add('show');overlay.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
@@ -492,10 +633,11 @@
         fiberToolLayers=L.layerGroup().addTo(fiberFullMap);
         measureMarkerLayer=L.layerGroup().addTo(fiberFullMap);
         measureLineLayer=L.layerGroup().addTo(fiberFullMap);
+        faultLayer=L.layerGroup().addTo(fiberFullMap);
         fiberFullMap.on('click',handleFiberMapClick);
       }
       fiberFullLayers.clearLayers();
-      fiberToolLayers?.clearLayers();measureMarkerLayer?.clearLayers();measureLineLayer?.clearLayers();hideToolPanel();measurePoints=[];measureTotal=0;fiberMode='trace';
+      fiberToolLayers?.clearLayers();measureMarkerLayer?.clearLayers();measureLineLayer?.clearLayers();faultLayer?.clearLayers();toggleFaultPanel(false);hideToolPanel();measurePoints=[];measureTotal=0;fiberMode='trace';
       currentFiberNet=net;currentFiberGraph=buildGraph(net.routes);
       document.getElementById('traceBtn')?.classList.add('active');document.getElementById('measureBtn')?.classList.remove('active');
       const pts=[];
@@ -525,7 +667,7 @@
     }
     function fitFiberFullscreen(){if(fiberFullMap&&fiberFullBounds&&fiberFullBounds.isValid())fiberFullMap.fitBounds(fiberFullBounds.pad(.08));}
     function closeFiberFullscreen(){
-      clearFiberTools();currentFiberNet=null;currentFiberGraph=null;
+      clearFiberTools();currentFiberNet=null;currentFiberGraph=null;currentFiberFDP=null;currentFiberCfg=null;
       const overlay=document.getElementById('fiberFullscreen');overlay.classList.remove('show');overlay.setAttribute('aria-hidden','true');document.body.style.overflow='';
     }
 
