@@ -349,10 +349,13 @@
     function fiberPointKind(name=''){
       const n=String(name||'').toUpperCase().trim();
       if(n.includes('TM NODE')||n.includes('OLT')) return 'NODE';
-      if(n==='JT'||n.includes('JOINT')) return 'JT';
+      if(n==='JT'||n.includes('JOINT')||n.includes('CLOSURE')||n.includes('CLOSER')) return 'JT';
       if(/DB\s*\d+[A-Z]?/i.test(n)) return 'DB';
       if(/DP\s*\d+[A-Z]?/i.test(n)) return 'DP';
-      return 'FDC';
+      // FDC must be explicit. Codes such as "KGU C016" / "NBN C001" are the actual FDC source markers.
+      if(n.includes('FDC')||/^[A-Z]{3}\s*_?C\d{3}M?$/.test(n.replace(/-/g,'_'))) return 'FDC';
+      // Remaining point placemarks in FD routes are treated as fiber joint/closure, not FDC.
+      return 'JT';
     }
     function fiberIcon(kind){
       const cfg={NODE:['#7c3aed','N'],FDC:['#059669','F'],JT:['#f59e0b','J'],DB:['#0891b2','B'],DP:['#0b67d1','D']}[kind]||['#64748b','•'];
@@ -492,92 +495,35 @@
       return net.points.find(p=>candidates.includes(normalizeFiberName(p.name))) ||
              net.points.find(p=>{const k=normalizeFiberName(p.name);return fiberPointKind(p.name)==='FDC'&&candidates.some(c=>k.includes(c)||c.includes(k));}) || null;
     }
-    function distancePointToRouteSet(point,routes){
-      let best=Infinity;
-      routes.forEach(r=>{
-        for(let i=1;i<r.coords.length;i++){
-          const z=projectToSegment(point,r.coords[i-1],r.coords[i]);
-          if(z.d<best)best=z.d;
-        }
-      });
-      return best;
-    }
     function buildOrderedDPtoFDCPath(net,cfg,fdp){
       const dp=findFiberPointByName(net,fdp?.nama||'');
+      const src=findSourcePoint(net,cfg);
       if(!dp)throw new Error('DP/FDP point not found in fiber route');
-
+      if(!src)throw new Error('FDC/source point not found in fiber route');
       const ds=net.routes.filter(r=>r.type==='DS');
-      const es=net.routes.filter(r=>r.type==='ES');
       if(!ds.length)throw new Error('No DS cable route found');
+      const g=buildGraph(ds),dn=nearestNode(g,[dp.lat,dp.lng],60),sn=nearestNode(g,[src.lat,src.lng],60);
+      if(!dn||!sn)throw new Error('DP/FDC is not connected to DS topology');
+      const path=shortestPath(g,dn.i,sn.i);
+      if(!path)throw new Error('No DS path from DP to FDC');
 
-      const g=buildGraph(ds);
-      const dn=nearestNode(g,[dp.lat,dp.lng],60);
-      if(!dn)throw new Error('Selected DP is not connected to DS topology');
-
-      // Find the first real FDC boundary reachable from this DP:
-      // a non-DP/JT point sitting on DS and at/near the ES handoff.
-      const fdcCandidates=[];
-      net.points.forEach(p=>{
-        if(!isFinite(p.lat)||!isFinite(p.lng))return;
-        if(fiberPointKind(p.name)!=='FDC')return;
-        const sn=nearestNode(g,[p.lat,p.lng],35);
-        if(!sn)return;
-        const esGap=es.length?distancePointToRouteSet([p.lat,p.lng],es):0;
-        if(es.length&&esGap>35)return;
-        const path=shortestPath(g,dn.i,sn.i);
-        if(!path)return;
-        fdcCandidates.push({point:p,node:sn,path,distance:path.distance+sn.d,esGap});
-      });
-
-      let best=fdcCandidates.sort((a,b)=>a.distance-b.distance)[0]||null;
-
-      // Geometry fallback: detect the nearest DS graph node that actually meets ES.
-      if(!best&&es.length){
-        const boundary=[];
-        g.nodes.forEach((node,i)=>{
-          const esGap=distancePointToRouteSet(node,es);
-          if(esGap>10)return;
-          const path=shortestPath(g,dn.i,i);
-          if(!path)return;
-          boundary.push({
-            point:{name:'FDC '+(cfg?.source||''),lat:node[0],lng:node[1]},
-            node:{i,d:0},
-            path,
-            distance:path.distance,
-            esGap
-          });
-        });
-        best=boundary.sort((a,b)=>a.distance-b.distance)[0]||null;
-      }
-
-      // Last compatibility fallback only when no DS↔ES boundary can be identified.
-      if(!best){
-        const src=findSourcePoint(net,cfg);
-        if(!src)throw new Error('FDC boundary not found');
-        const sn=nearestNode(g,[src.lat,src.lng],60);
-        if(!sn)throw new Error('FDC is not connected to DS topology');
-        const path=shortestPath(g,dn.i,sn.i);
-        if(!path)throw new Error('No DS path from DP to FDC');
-        best={point:src,node:sn,path,distance:path.distance+sn.d,esGap:Infinity};
-      }
-
-      const coords=[];
-      const dpExact=[dp.lat,dp.lng];
+      // Start from the exact selected DP coordinate, then follow the DS graph to the one registered FDC.
+      const coords=[[dp.lat,dp.lng]];
       const firstNode=g.nodes[dn.i];
-      coords.push(dpExact);
-      if(haversine(dpExact,firstNode)>0.5)coords.push(firstNode);
-      best.path.edges.forEach((e,i)=>{
+      if(haversine(coords[0],firstNode)>0.5)coords.push(firstNode);
+      path.edges.forEach(e=>{
         const a=g.nodes[e.a],b=g.nodes[e.b];
-        if(!coords.length||haversine(coords[coords.length-1],a)>0.5)coords.push(a);
+        if(haversine(coords[coords.length-1],a)>0.5)coords.push(a);
         if(haversine(coords[coords.length-1],b)>0.5)coords.push(b);
       });
-      const fdcExact=[best.point.lat,best.point.lng];
-      if(isFinite(fdcExact[0])&&isFinite(fdcExact[1])&&haversine(coords[coords.length-1],fdcExact)<=35&&haversine(coords[coords.length-1],fdcExact)>0.5)coords.push(fdcExact);
+      const fdcExact=[src.lat,src.lng];
+      if(haversine(coords[coords.length-1],fdcExact)>0.5 && haversine(coords[coords.length-1],fdcExact)<=60)coords.push(fdcExact);
 
       const total=routeLength(coords);
       if(coords.length<2||total<=0)throw new Error('DS path is too short to calculate OTDR distance');
-      return {coords,distance:total,dp,src:best.point};
+      return {coords,distance:total,dp,src};
     }
+
     function pointAtRouteDistance(coords,targetM){
       if(!coords.length)return null;
       if(targetM<=0)return {point:coords[0],index:0,ratio:0};
